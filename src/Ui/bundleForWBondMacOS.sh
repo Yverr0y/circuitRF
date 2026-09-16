@@ -109,6 +109,43 @@ echo "🚚 Copying published files..."
 cp -R "${PUBLISH_DIR}/." "$MAC_OS_DIR/"
 chmod +x "${MAC_OS_DIR}/${EXECUTABLE_NAME}"
 
+# -- Nothing under Contents/MacOS may have a DOT in a DIRECTORY name --------------------------
+#
+# codesign reads every directory under Contents/MacOS as code, and a dot in a directory's name
+# makes it read that directory as a NESTED BUNDLE. It looks for an Info.plist, does not find one,
+# and rejects THE WHOLE APP:
+#
+#     circuitRF.app: bundle format unrecognized, invalid, or unsuitable
+#     In subcomponent: .../Contents/MacOS/examples/PDK PCells/.generated-cells
+#
+# The message names the directory and nothing else - not the rule, not the remedy - so the first
+# guess is always that the directory's CONTENTS are wrong. They are not; the name is. Measured
+# 2026-09-16: an empty directory called `.foo` fails identically, `--deep` changes nothing (the
+# rule is the LOCATION, not the flag), a directory called `results` signs fine, and the same
+# `.generated-cells` tree under Contents/RESOURCES signs fine too.
+#
+# Dot FILES are unaffected. `.cws`, `.ccell`, `.gitignore` - every dotfile the example workspaces
+# carry - sign without comment. Only directories are read as bundles.
+#
+# What put one here was src/Ui/CircuitRF.Ui.csproj sweeping a workspace's local `.generated-cells`
+# PCell cache into the publish tree; that copy now excludes it. This refusal stays because the
+# next such directory will arrive the same way, and because the publish tree NEVER DELETES a stale
+# file - a folder excluded from the copy today is still sitting in bin/ from yesterday's build.
+STRAY_DIRS=$(find "$MAC_OS_DIR" -type d -name '*.*')
+if [ -n "$STRAY_DIRS" ]; then
+    echo "❌ A directory name under Contents/MacOS has a dot in it; codesign reads it as a"
+    echo "   nested bundle and will reject the whole .app:"
+    echo "$STRAY_DIRS" | sed "s|^${MAC_OS_DIR}/|     |"
+    echo ""
+    echo "   Nothing is wrong with what is inside it - the NAME is what codesign objects to."
+    echo "   If it is build output (a .generated-cells cache is the usual one), delete it from"
+    echo "   the publish tree and build again; dotnet publish leaves stale files behind, so an"
+    echo "   exclusion added to the .csproj does not remove one already there:"
+    echo ""
+    echo "     rm -rf \"${PUBLISH_DIR}\""
+    exit 1
+fi
+
 echo "📄 Copying Info.plist..."
 cp "$CUSTOM_PLIST" "${CONTENTS_DIR}/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${CRF_VERSION}" "${CONTENTS_DIR}/Info.plist"

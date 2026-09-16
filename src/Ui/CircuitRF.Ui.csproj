@@ -353,9 +353,26 @@
       `.cws` did not travel is not a workspace. What is deliberately NOT here is any RESULT: an
       example ships its design and its EM setup, and the user runs them. `results/**` is excluded
       for that reason, and because the antenna's own run is 52 MB.
+
+      NOR IS ANY MACHINE-LOCAL STATE. `examples/` is a tree the owner OPENS, so running circuitRF
+      leaves things in it that belong to that machine and not to the release: `.generated-cells/`
+      (the rebuildable PCell layout cache), `.cwsuser` (one person's dock layout, tab set and screen
+      geometry), and the `.crf-*` session bookkeeping - the advisory open-notice, the write probe,
+      the atomic-write temporaries. Each example's own `.gitignore` already lists exactly these, and
+      WorkspaceArchive already prunes them; this copy did not, so what shipped depended on whether
+      the person building had opened an example. The exclusions here restore the property that a
+      release built on a working machine is the release built from a clean clone.
+
+      `.generated-cells/` in particular BROKE THE MACOS RELEASE BUILD (2026-09-16), and for a reason
+      that has nothing to do with its contents: codesign reads every DIRECTORY under Contents/MacOS
+      as code, and a dot in a directory's name makes it read that directory as a nested bundle, find
+      no Info.plist in it, and reject the entire .app with "bundle format unrecognized, invalid, or
+      unsuitable". The three bundleFor*MacOS.sh scripts now refuse that shape by name rather than
+      leaving codesign to describe it. Dot FILES are unaffected - `.cws` and `.ccell` sign without
+      comment, which is why only the directory matters.
     -->
     <None Include="../../examples/**/*.*"
-          Exclude="../../examples/**/results/**/*.*;../../examples/**/.DS_Store">
+          Exclude="../../examples/**/results/**/*.*;../../examples/**/.DS_Store;../../examples/**/.generated-cells/**/*.*;../../examples/**/.cwsuser;../../examples/**/.crf-*;../../examples/**/*.crf-tmp-*">
       <Link>examples/%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

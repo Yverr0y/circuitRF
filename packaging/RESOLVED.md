@@ -1275,3 +1275,77 @@ maps `${PUBLISH}/` to `/opt/circuitrf/` — so all three carry the examples with
 Checked rather than assumed: `dotnet publish -r osx-arm64` puts 62 example files in the publish
 tree, and the harvester's generated ids are counters (`dir3`, `cmp17`), not derived from the folder
 name, so the spaces in "Harmonic Balance" and "Patch Antenna" are not a WiX identifier problem.
+
+---
+
+## "bundle format unrecognized": a DIRECTORY NAME with a dot in it, under `Contents/MacOS` (2026-09-16)
+
+**Symptom, as reported:** `packaging/macos/build-macos.sh` got as far as signing and stopped.
+
+```
+./bin/Release/net10.0/osx-arm64/circuitRF.app: replacing existing signature
+./bin/Release/net10.0/osx-arm64/circuitRF.app: bundle format unrecognized, invalid, or unsuitable
+In subcomponent: .../circuitRF.app/Contents/MacOS/examples/PDK PCells/.generated-cells
+❌ Code signing failed.
+```
+
+**The directory's CONTENTS are irrelevant. Its NAME is the whole of it.** `codesign` reads every
+directory under `Contents/MacOS` as code, and a dot in a directory's name makes it read that
+directory as a nested bundle; it then looks for an `Info.plist`, does not find one, and rejects the
+entire `.app`. The message names the offending path and neither the rule nor the remedy, which is
+why the first three guesses are all about what is inside.
+
+Each half was measured separately against a throwaway `.app`, because each one rules out a different
+plausible theory:
+
+| shape                                                 | signs? |
+|-------------------------------------------------------|--------|
+| `Contents/MacOS/examples/.generated-cells/…` (`--deep`) | no     |
+| the same, with **no** `--deep`                         | no     |
+| an **empty** directory called `.foo`                    | no     |
+| `plain.dir`, `a.b`, `.hidden-thing`                     | no     |
+| a directory called `results`                            | yes    |
+| the identical tree under `Contents/**Resources**`       | yes    |
+
+So: not `--deep` (the rule is the LOCATION, not the flag — dropping `--deep` fails the same way and
+additionally breaks the seal); not the `.ccell`/`.clay` files inside; not the leading dot
+specifically (any dot in a directory name does it); and not a general prohibition on dotfiles —
+`.cws`, `.ccell`, `.gitignore` and every other dot **file** the example workspaces carry sign
+without comment. Only directories are read as bundles, and only in the code area.
+
+**What put a dotted directory there.** `src/Ui/CircuitRF.Ui.csproj` copies `examples/**/*.*` into
+the app output. `examples/` is a tree the owner OPENS and edits in place, so running circuitRF
+leaves machine-local state in it, and the copy took all of it: `.generated-cells/` (the rebuildable
+PCell layout cache), `.cwsuser` (one person's dock layout, tab set and 1920×996 screen geometry) and
+the `.crf-*` session bookkeeping. Each example's own `.gitignore` already lists exactly these, and
+`WorkspaceArchive` already prunes them — this one copy did not. **What shipped therefore depended on
+whether the person building had ever opened an example**, which is also why it had never happened
+before. The item group now excludes all of them, so a release built on a working machine is the
+release built from a clean clone.
+
+**Windows and Linux never fail on this; they SHIP it.** A dotted directory is an ordinary directory
+to both. `build-windows.ps1`'s harvester enumerates with `-Force` (see the entry above, which is
+there for the opposite reason) and would have written it into `Files.wxs` as a normal `<Directory>`;
+`build-linux.sh` tars and `fpm`s whatever is staged. The defect on those two platforms was the
+payload, not the build, and the `.csproj` exclusion is the fix for all three at once — which is why
+it belongs there and not in a bundle script.
+
+**The refusal in the three `bundleFor*MacOS.sh` scripts stays anyway**, for two reasons that outlive
+this particular directory:
+
+- **The macOS publish tree is never cleaned.** `build-linux.sh` does `rm -rf "$PUBLISH"` and
+  `build-windows.ps1` does `Remove-Item $publish -Recurse -Force`; the macOS path publishes into
+  `src/Ui/bin/Release/net10.0/<rid>/publish` and leaves stale files alone. An exclusion added to the
+  `.csproj` today does **not** remove the copy already sitting there from yesterday's build, so the
+  refusal's message says so and prints the `rm -rf`.
+- **`codesign`'s own message cannot be acted on.** The check runs immediately after the copy, before
+  `codesign`, lists every offending path relative to `Contents/MacOS`, and says that the name rather
+  than the contents is at fault.
+
+Verified end to end: with the exclusion, `bundleForMacOS.sh` signs (exit 0) and all six examples and
+their 18 `.cws`/`.ccell` files are present in the bundle; with a `.generated-cells` planted back in
+the publish tree, the script refuses at the new check with exit 1 and never reaches `codesign`.
+
+Held by `PackagingScriptTests.MacBundleScripts_RefuseADottedDirectoryUnderContentsMacOS` (all three
+scripts: the scan exists, it exits non-zero, and it runs before `codesign`) and
+`ExampleWorkspacesTests.TheItemGroupDoesNotShipMachineLocalState`.

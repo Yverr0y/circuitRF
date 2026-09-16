@@ -107,6 +107,40 @@ public sealed class ExampleWorkspacesTests(ITestOutputHelper output) : IDisposab
         Assert.Contains("results/**", group, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The item group excludes the state a machine leaves in an example workspace when someone
+    /// OPENS it — so a release built on a working machine is the release built from a clean clone.
+    ///
+    /// <para><c>examples/</c> is a tree the owner edits in place, so running circuitRF drops things
+    /// in it that belong to that machine: the rebuildable <c>.generated-cells</c> PCell cache, the
+    /// <c>.cwsuser</c> dock layout (one person's panel proportions, tab set and screen geometry),
+    /// and the <c>.crf-*</c> session bookkeeping. Each example's own <c>.gitignore</c> already lists
+    /// exactly these and <c>WorkspaceArchive</c> already prunes them; this copy did not, so what
+    /// shipped depended on who built it.</para>
+    ///
+    /// <para><c>.generated-cells</c> is also the one that BROKE the macOS release build (2026-09-16),
+    /// for a reason that has nothing to do with its contents — see
+    /// <c>PackagingScriptTests.MacBundleScripts_RefuseADottedDirectoryUnderContentsMacOS</c>.</para>
+    /// </summary>
+    [Theory]
+    [InlineData(".generated-cells/**/*.*", "a rebuildable PCell cache, machine-local, and a dotted "
+        + "DIRECTORY that codesign rejects the whole .app over")]
+    [InlineData(".cwsuser", "one person's dock layout and screen geometry")]
+    [InlineData(".crf-*", "circuitRF's own per-session bookkeeping — the advisory open-notice and "
+        + "the write probe")]
+    public void TheItemGroupDoesNotShipMachineLocalState(string excluded, string why)
+    {
+        string proj = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Ui", "CircuitRF.Ui.csproj"));
+
+        int at = proj.IndexOf("../../examples/**", StringComparison.Ordinal);
+        Assert.True(at >= 0, "src/Ui/CircuitRF.Ui.csproj no longer copies examples/ into the app output.");
+
+        string group = proj[at..proj.IndexOf("</None>", at, StringComparison.Ordinal)];
+        Assert.True(group.Contains($"examples/**/{excluded}", StringComparison.Ordinal),
+            $"src/Ui/CircuitRF.Ui.csproj no longer excludes examples/**/{excluded} from the copy, so "
+            + $"the app now ships {why} — whatever happened to be in the builder's own tree.");
+    }
+
     // ══ 2. The index and the disk agree ═════════════════════════════════════
 
     [Fact]

@@ -953,6 +953,63 @@ public class PackagingScriptTests
             + "strips the virtualization entitlement back off again.");
     }
     /// <summary>
+    /// <b>Every macOS bundle script refuses a directory with a dot in its name under
+    /// <c>Contents/MacOS</c>, before it reaches <c>codesign</c>.</b>
+    ///
+    /// <para>codesign reads every directory under <c>Contents/MacOS</c> as code, and a dot in a
+    /// directory's NAME makes it read that directory as a nested bundle. Finding no Info.plist, it
+    /// rejects the whole app:</para>
+    ///
+    /// <code>
+    /// circuitRF.app: bundle format unrecognized, invalid, or unsuitable
+    /// In subcomponent: .../Contents/MacOS/examples/PDK PCells/.generated-cells
+    /// </code>
+    ///
+    /// <para>Measured 2026-09-16, and each half separately: an EMPTY directory called <c>.foo</c>
+    /// fails identically, so the contents are irrelevant; <c>--deep</c> changes nothing, so the flag
+    /// is irrelevant; a directory called <c>results</c> signs; and the same tree under
+    /// <c>Contents/Resources</c> signs. Dot FILES are unaffected — the example workspaces' <c>.cws</c>
+    /// and <c>.ccell</c> sign without comment.</para>
+    ///
+    /// <para>The one that actually broke a release build was a workspace's local
+    /// <c>.generated-cells</c> PCell cache, which <c>CircuitRF.Ui.csproj</c> now excludes from the
+    /// examples copy. The refusal stays anyway, because the publish tree under <c>src/Ui/bin</c> is
+    /// never cleaned — an exclusion added today leaves yesterday's copy sitting there — and because
+    /// codesign's own message names the directory and neither the rule nor the remedy.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("src/Ui/bundleForMacOS.sh")]
+    [InlineData("src/Ui/bundleForHarmonicaMacOS.sh")]
+    [InlineData("src/Ui/bundleForWBondMacOS.sh")]
+    public void MacBundleScripts_RefuseADottedDirectoryUnderContentsMacOS(string relativePath)
+    {
+        var lines = File.ReadAllLines(RepoFile(relativePath.Split('/')))
+                        .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal))
+                        .ToList();
+
+        int check = lines.FindIndex(l => l.Contains("-type d -name '*.*'", StringComparison.Ordinal)
+                                      && l.Contains("MAC_OS_DIR", StringComparison.Ordinal));
+        Assert.True(check >= 0,
+            $"{relativePath} no longer scans $MAC_OS_DIR for a directory whose NAME contains a dot. "
+            + "codesign reads such a directory as a nested bundle and rejects the entire .app with "
+            + "\"bundle format unrecognized, invalid, or unsuitable\" — naming the directory and "
+            + "nothing else, so the cause is not apparent from the message.");
+
+        // It has to REFUSE, not warn: an unsigned or half-signed .app is not a shippable outcome.
+        string after = string.Join("\n", lines.Skip(check).Take(24));
+        Assert.True(after.Contains("exit 1", StringComparison.Ordinal),
+            $"{relativePath} finds the dotted directory but does not exit non-zero, so the build "
+            + "carries on into codesign and fails there instead — with codesign's message, which is "
+            + "the one this check exists to replace.");
+
+        // And BEFORE codesign, or it has replaced nothing.
+        int sign = lines.FindIndex(l => l.Contains("codesign", StringComparison.Ordinal));
+        Assert.True(sign > check,
+            $"{relativePath} runs codesign before the dotted-directory check, so codesign still gets "
+            + "there first and the check never speaks.");
+    }
+
+    /// <summary>
     /// <b>No <c>--</c> inside an XML comment in any macOS plist.</b> It is illegal XML, but
     /// <c>plutil -lint</c> accepts it, so the file looks fine right up until <c>codesign</c> reads
     /// the ENTITLEMENTS file with its own stricter parser and refuses the whole thing:
