@@ -159,14 +159,21 @@ public static class EmSnpProvenance
             // writer transliterates to, and a sigma or a subscripted a21 comes out of it as "?" —
             // measured on this very line, which first read "worst ?_max(S)". A caveat the file
             // cannot spell is a caveat nobody can act on.
+            // ── MIM-9 item 4 — THE CAUSE COMES FROM THE RUN, NOT FROM A SECOND GUESS HERE ──────
+            //
+            // What used to follow "the excess is this analysis rather than the design" was a
+            // sentence blaming the peel, written independently of the one PlanarSolve's own panel
+            // note carries. Two copies of one guess: MIM-9 corrected the attribution in the panel
+            // and this one would have gone on saying the old thing in every .sNp ever written —
+            // which is the copy that outlives the session and is the first thing anyone reads six
+            // months later. The engine decides it once, from its own counters, and this reads it.
             caveats.Add(
                 $"{np.Count} of these rows are NOT A PASSIVE NETWORK and should not be used: " +
                 $"{which}, worst sigma_max(S) = " +
                 $"{worst.ToString("0.0###", CultureInfo.InvariantCulture)}. " +
                 "A passive structure cannot exceed 1, so the excess is this analysis rather than the " +
-                "design: the de-embedding's own peel divides by a21 squared, which vanishes with " +
-                "frequency, so the bottom of a band is where it shows. Raise the sweep's lower edge, " +
-                "or read those rows as unanswered.");
+                "design." +
+                (solve.NonPassivityCause.Length > 0 ? " " + solve.NonPassivityCause : ""));
         }
 
         return caveats;

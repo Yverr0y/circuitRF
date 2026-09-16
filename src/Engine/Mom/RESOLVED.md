@@ -3,6 +3,127 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## MIM-9 — the three notes that sent a user the wrong way (2026-09-16)
+
+`brief-em-mim-9-thin-film-diagnostics.md`. **Every change here is a reporting change on top of an
+answer that does not move**, plus one refusal. Nothing in the fill, the peel or the solve was
+touched, and the whole of `Engine.Tests` is unchanged apart from two sentinels named below.
+
+The defect cost a user days of work on the wrong thing, and the engine was not silent — it printed
+more than thirty notes on the fixture. The sentences that fired **named the wrong cause**, and the
+one sentence that could have helped **said the run was fine**.
+
+### 1. Two constants, not one, because they measure two different things
+
+`PlanarLevels.ValidatedCellOverSeparation = 200` certifies the cross-level FILL and the
+ELECTROSTATIC plate capacitance — `PlanarFill.ScalarPotentialMatrix` driven by a 1 V / 0 V
+instrument with no port in it. It is still true at 200 and no number in it changed.
+
+`PlanarLevels.FullWaveCellOverSeparation = 40` is new and is a different quantity: the range a
+DE-EMBEDDED s-parameter of a close level pair is measured over, which is what a user actually reads.
+MIM-12's ladder — one plate pair, one set of feeds and ports, the straddling cell pinned at 40 µm,
+only the film thickness moving — reads `C/(ε₀εᵣA/d)` = 1.13 at cell/separation 20 and 1.05 at 40,
+then **−1.02 at 80 and −1.52 at 200**. The capacitor reads as an inductor.
+
+**Quoting the first at someone reading the second is the whole defect.** The shipped note said "the
+closest conductor levels are resolved by the mesh … the extracted plate capacitance within 1% of
+ε₀εᵣA/d" at cell/separation 200, and every clause of it was TRUE. A run whose published capacitor
+had the wrong sign was reading it. The reassuring arm is now bounded by 40, not 200, and the arm
+between the two states what was validated and what was not in those words.
+
+### 2. The floor is a REFUSAL — `PlanarSolve.LevelSeparationVerdict`
+
+R-emsev-4, deferred by MIM-8 **conditionally**: past its own bound the answer was *unmeasured*
+rather than *wrong*, and refusing on "unmeasured" invents a limit rather than reporting one
+(R-prt-13). **The condition has been met from the other side.** The measurement exists and it does
+not say unmeasured — it says the element inverts its sign between 40 and 80. So the refusal is
+earned, in `PlanarLevels.CanRepresentVias`' own words: approximating it would give a plausible wrong
+answer rather than an obvious failure.
+
+It is a refusal rather than a note because of what the answer looks like past it: complete, smooth,
+reciprocal, plausible, and **converged** — 2, 4 and 8 cells across give σ_max 1.7322, 1.7439, 1.7491,
+moving slightly the wrong way. No mesh control reaches it.
+
+Wired in two places and both matter: `VerticalRangeVerdict` (so `PlanarSolve.Run` refuses before a
+matrix is filled) and `EmRunService.Preflight` (so `circuitrf check` refuses the same setup without
+solving — a preflight that passes a setup the run refuses is the drift R-aut4-2 exists to prevent).
+**The notes come back WITH the refusal**, because a refusal on its own takes away the sentence
+explaining the scale it was measured on.
+
+**The remedies it names are only the ones that act**, which is §3.5's trap and item 1's subject:
+thicken the film, or take the upper level out of the run and model the part as a circuit element.
+The three the old sentence offered were each measured inert on this very structure — Cells per
+wavelength 20 → 400 leaves σ_max unchanged to four decimals (that knob sets the pitch ALONG the
+current; the plate's own width sets it across), 2 → 4 → 8 cells across moves it the wrong way, and
+there is no well-conditioned sub-band to narrow to.
+
+**`FullWaveCellOverSeparation` is a measurement's name and MIM-12 will raise it.** Re-point the one
+constant; a fix that removes the refusal instead of moving it is how the next regime becomes silent.
+
+### 3. The NOT PASSIVE attribution follows the counters — and is written ONCE
+
+The shipped sentence named the de-embedding as "the usual cause" on every non-passive run. On the
+class of run that produced it the peel is innocent and **the engine already computes the number that
+says so**: `DeembedErrorFloor` reads 1.6e-3 against a non-passivity excess of 0.73, three decades
+apart. The identical structure with the second level removed — same artwork, feeds, ports and
+technology — is passive at σ_max = 0.9986.
+
+`PlanarSolve.NonPassivityCause(excess, peelErrorFloor, pair)` decides it from those counters. Three
+arms: a conductor pair past the full-wave floor; the de-embedding, **kept verbatim in substance
+because it is right for the case it was written for** (the shipped spiral's bottom decade, where the
+floor really does reach the size of the excess) but now EARNED rather than assumed; and *not
+attributed*, which quotes the number that exonerates the peel so a reader told "not the
+de-embedding" does not go and check it anyway.
+
+**The pair arm is pre-empted from `Run` today** — such a run refuses at §2 before a matrix is filled
+— and it is there rather than deleted because MIM-12 raises the floor, and the band between the old
+floor and the new one becomes runnable. Its gate drives the function directly.
+
+**And it is written in exactly one place.** The guess existed TWICE, independently:
+`PlanarSolve.PassivityNote` for the panel and `EmSnpProvenance.ValidityCaveats` for the `.s2p`
+header. Correcting one leaves the other wrong in every file already on disk — and the file is the
+copy that outlives the session and is the first thing anyone reads six months later. The engine
+decides once, carries it on `PlanarSolveResult.NonPassivityCause`, and both read it.
+
+**It is ASCII, and that costs the panel a subscript.** Touchstone is written in an encoding
+`EmSnpProvenance` transliterates to; a σ or an a₂₁ arrives there as `?`, measured on that very line.
+One function producing two spellings is two chances to drift.
+
+### What is past the floor is the GEOMETRY against the film, not the technology
+
+Worth knowing because the brief's own framing invites the opposite reading. The shipped MMIC
+technology's 0.2 µm film does not by itself put a capacitor past the floor — **the straddling cell
+does**, and it is set by every gridline the artwork puts inside the plate. Measured on this
+repository's own fixtures at `CellsPerWavelength: 20`:
+
+| drawn | largest straddling cell | cell/sep | |
+|---|---|---|---|
+| 10 × 10 µm plate, MIM via + Metal2 strap | 2.5 µm | 12.5 | runs |
+| 60 × 60 µm plate, MIM via + Metal2 strap | 3.667 µm | 18.3 | runs |
+| 60 × 60 µm plate, fed on Metal1, no via inside it | 60 µm | 300 | **refused** |
+
+The via and the strap are what cut the cell: they are shapes on the shared tensor grid, so their
+edges subdivide the plate underneath them. MIM-12's own fixture — a 60 µm plate whose straddling
+cell it reports as 40 µm — is the third row's shape, not the second's. So a user with a strapped
+capacitor may well keep running, and a refusal is not a statement about their process.
+
+### What this cost elsewhere — two sentinels, no behaviour
+
+`PeelConditioningTests` matched the peel-conditioning note by the bare token `DeembedErrorFloor`,
+which the attribution now also names — deliberately, so a reader told the peel is or is not the
+cause knows which diagnostic says so. Both sentinels were tightened to that note's own closing
+clause, `"The DeembedErrorFloor result estimates"`, which is what those lines always meant. No
+published number moved; `Engine.Tests` is otherwise unchanged at 2,519.
+
+### Gates
+
+`MimThinLayerTests.M9_1/M9_2/M9_3` and `NonPassiveCaveatTests`. M9_2 is the one worth knowing about:
+it walks cell/separation 5 → 500 and asserts that **"resolved by the mesh" and the refusal cannot
+both fire**, as an equality rather than two separate claims, so the two can never drift apart.
+`NonPassiveCaveatTests.TheAttributionIsWrittenInExactlyOnePlace` is the source scan, on
+`Authoring.cs`' terms: comment-stripped, over all of `src/`, exactly one file may carry the
+attribution prose.
+
 ## PCAL7/LFP review — the band walk started one cell out on a high-side port (2026-09-15)
 
 A review of the two briefs above, reading the code against what they say it does. One defect, two

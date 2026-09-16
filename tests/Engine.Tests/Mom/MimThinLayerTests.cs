@@ -194,12 +194,14 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         _out.WriteLine("SHIPPED: " + shipped);
         _out.WriteLine("WIDE:    " + wide);
 
+        // MIM-9 moved the QUIET arm's own bound: "resolved by the mesh" is now said only inside the
+        // full-wave floor of 40, not inside the fill's 200. 12.5 and 0.833 are both inside it, so
+        // the two quiet rungs are unchanged; 500 is past both bounds and still shouts.
         Assert.Contains("CELL/SEPARATION = 500", past);
-        Assert.Contains("PAST", past);
         Assert.Contains("cell/separation = 12.5", shipped);
-        Assert.DoesNotContain("PAST", shipped);
+        Assert.Contains("are resolved by the mesh", shipped);
         Assert.Contains("cell/separation = 0.833", wide);
-        Assert.DoesNotContain("PAST", wide);
+        Assert.Contains("are resolved by the mesh", wide);
     }
 
     [Fact]
@@ -292,13 +294,120 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
         var (verdict, notes) = PlanarSolve.VerticalRangeVerdict(p, mesh, 10e9);
 
-        Assert.True(verdict.Ok, verdict.Reason);
+        // MIM-9: at cell/separation 500 this is now a REFUSAL as well as a warning, and the notes
+        // come back WITH it — a refusal on its own would take away the sentence that explains the
+        // scale it was measured on.
+        Assert.False(verdict.Ok);
         Assert.Contains(notes, n => n.Text.Contains("CELL/SEPARATION"));
 
         // EM-SEV R-emsev-4: and it rides the sweep AS A WARNING. The capitals this sentence has
         // always carried were the author reaching for a class the type system did not have.
         Assert.All(notes.Where(n => n.Text.Contains("CELL/SEPARATION")),
                    n => Assert.True(n.IsWarning));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // M9 — brief-em-mim-9-thin-film-diagnostics.md. Three notes sent a user the wrong way: the
+    // non-passivity sentence blamed the innocent de-embedding, the level-separation note reassured
+    // on a quantity that was never in question, and the floor was a note where it should have been
+    // a refusal. Every gate here is on WHAT THE RUN SAYS; no answer moves.
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void M9_1_PastTheFullWaveFloorItRefuses_NamingThePairTheSeparationAndTheCellItMeasured()
+    {
+        // Item 3. R-emsev-4, deferred by MIM-8 on the grounds that past its bound the answer was
+        // unmeasured rather than wrong. MIM-12 measured it: correct to cell/separation 40, the
+        // SIGN inverted by 80, noise at 200. So the refusal is earned, and it is set at 40.
+        var p = Plates(0.2e-6, 80);
+        var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
+        var verdict = PlanarSolve.LevelSeparationVerdict(p, mesh);
+        _out.WriteLine(verdict.Reason);
+
+        Assert.False(verdict.Ok);
+        Assert.Contains("levels 0 and 1", verdict.Reason);
+        Assert.Contains("cell/separation = 80", verdict.Reason);
+        Assert.Contains("are 200 nm apart", verdict.Reason);           // the separation
+        Assert.Contains("straddling them is 16 µm", verdict.Reason);   // the cell
+        Assert.Contains("floor of 40", verdict.Reason);         // the measured floor
+
+        // And ONLY the remedies that act. The three the old sentence offered were each measured
+        // inert on this very structure, so naming one here is the defect coming back.
+        Assert.Contains("thicken the film", verdict.Reason);
+        Assert.Contains("model the part it carries as a circuit element", verdict.Reason);
+        Assert.DoesNotContain("raise Cells per wavelength", verdict.Reason);
+        Assert.DoesNotContain("narrow the sweep to where", verdict.Reason);
+
+        // Inside the floor nothing is refused — the bound has to let the many runs through that it
+        // was never measured against.
+        Assert.True(PlanarSolve.LevelSeparationVerdict(
+            Plates(0.2e-6, 20), SurfaceMesher.Mesh(Plates(0.2e-6, 20), Uniform).Mesh).Ok);
+    }
+
+    [Fact]
+    public void M9_2_TheReassuringClauseAndTheFullWaveFloorCannotBothFire()
+    {
+        // Item 2, and it is the sharpest form of the defect: every clause of "the closest conductor
+        // levels are resolved by the mesh … the extracted plate capacitance within 1% of ε₀εᵣA/d"
+        // was TRUE at cell/separation 200, and a run whose published capacitor had the wrong sign
+        // was reading it. MIM-8's validation is electrostatic; the user is reading a de-embedded
+        // s-parameter. The two sentences may not co-exist.
+        foreach (double ratio in new[] { 5.0, 20.0, 40.0, 80.0, 200.0, 500.0 })
+        {
+            var p = Plates(0.2e-6, ratio);
+            var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
+            string note = Assert.Single(PlanarSolve.LevelSeparationNotes(p, mesh, 10e9)).Text;
+            bool refused = !PlanarSolve.LevelSeparationVerdict(p, mesh).Ok;
+            _out.WriteLine($"{ratio,5}: refused={refused}  {note[..Math.Min(110, note.Length)]}");
+
+            Assert.Equal(refused, !note.Contains("are resolved by the mesh"));
+
+            // Past the floor the note has to state what was validated and what was not, in those
+            // terms — the electrostatic/full-wave distinction IS the finding, and it is what the
+            // reassuring version never said.
+            if (refused)
+            {
+                Assert.Contains("full-wave", note, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("ELECTROSTATIC", note);
+            }
+        }
+    }
+
+    [Fact]
+    public void M9_3_TheNonPassivityCauseFollowsTheCounters_NotAFixedGuessAtTheDeembedding()
+    {
+        // Item 1. The shipped sentence named the de-embedding as "the usual cause" on every
+        // non-passive run. On the run that produced it, DeembedErrorFloor reads 1.6e-3 against an
+        // excess of 0.73 — the peel's own estimate of its own error is three decades too small to
+        // be the cause, and the engine already computes it.
+        var thin = PlanarSolve.NonPassivityCause(
+            excess: 0.73, peelErrorFloor: 1.6e-3, pair: new PlanarLevelPair(0, 0.2e-6, 40e-6));
+        var peel = PlanarSolve.NonPassivityCause(excess: 0.09, peelErrorFloor: 0.12, pair: null);
+        var open = PlanarSolve.NonPassivityCause(excess: 0.73, peelErrorFloor: 1.6e-3, pair: null);
+        _out.WriteLine("THIN: " + thin);
+        _out.WriteLine("PEEL: " + peel);
+        _out.WriteLine("OPEN: " + open);
+
+        // A conductor pair past the floor: named, with its separation, and with the two mesh knobs
+        // measured inert rather than offered.
+        Assert.Contains("levels 0 and 1", thin);
+        Assert.Contains("cell/separation = 200", thin);
+        Assert.Contains("does NOT act", thin);
+        Assert.DoesNotContain("de-embedding rather than the fill", thin);
+
+        // The case the old sentence WAS written for — the shipped spiral's bottom decade, where the
+        // floor really does reach the size of the excess — keeps it. It must not be lost.
+        Assert.Contains("de-embedding rather than the fill", peel);
+        Assert.Contains("a21 squared", peel);
+
+        // And where nothing accounts for it, it says so rather than naming a cause anyway.
+        Assert.Contains("NOT the de-embedding", open);
+        Assert.Contains("not identified", open);
+
+        // ASCII throughout, because the same string is stamped into the Touchstone header and that
+        // writer transliterates — a σ or an a₂₁ arrives there as "?".
+        foreach (string t in new[] { thin, peel, open })
+            Assert.DoesNotContain(t, c => c > '\u007f' && c != 'µ');
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

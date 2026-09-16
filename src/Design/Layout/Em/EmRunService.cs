@@ -324,9 +324,16 @@ public static class EmRunService
 
         // MIM-3/MIM-8's question, which is a property of the MESH against the STACKUP and needs no
         // solve to answer — and which, past the measured bound, is EM-SEV R-emsev-4's warning.
-        findings.AddRange(PlanarSolve.LevelSeparationNotes(
-            meshed, report.Mesh, fMax,
-            EmLengthFormat.For(source.View.DisplayUnit, source.DbuPerMicron)));
+        var lengthFmt = EmLengthFormat.For(source.View.DisplayUnit, source.DbuPerMicron);
+        findings.AddRange(PlanarSolve.LevelSeparationNotes(meshed, report.Mesh, fMax, lengthFmt));
+
+        // MIM-9 item 3 — and past the FULL-WAVE floor it is R-emsev-4's REFUSAL, which this has to
+        // report for the same reason it reports every other one: a preflight that passed a setup the
+        // run refuses is the drift R-aut4-2 exists to prevent. Asked after the notes so the scale
+        // sentence is in `findings` beside it.
+        if (PlanarSolve.LevelSeparationVerdict(meshed, report.Mesh, lengthFmt) is { Ok: false } thin)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         thin.Reason, report);
 
         return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings, null,
                                      report);

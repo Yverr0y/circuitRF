@@ -1083,6 +1083,66 @@ public class MimCapacitorTests(ITestOutputHelper output)
     }
 
     /// <summary>A bare Metal1 line, for reading the EM extractor's own substrate height.</summary>
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // MIM-9 — the shipped MMIC capacitor is REFUSED, and `check` says so without solving
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>The wiring gate for R-emsev-4, on the real technology and the real artwork.</b>
+    ///
+    /// <para>The bound itself is measured and gated in <c>Engine.Tests</c>
+    /// (<c>MimThinLayerTests.M9_1</c>); what this asks is the other half, and it is the half that
+    /// silently fails: <c>EmRunService.Preflight</c> is what <c>circuitrf check</c> runs, and a
+    /// preflight that PASSES a setup the run refuses is exactly the drift R-aut4-2 exists to
+    /// prevent. It also fills no matrix and solves nothing, so it costs a second rather than
+    /// minutes.</para>
+    ///
+    /// <para>The findings come back WITH the refusal — a bare refusal takes away the sentence that
+    /// explains the scale it was measured on.</para>
+    /// </summary>
+    [Fact]
+    public void M9_APlatePairPastTheFullWaveFloorIsRefusedBeforeAMatrixIsFilled()
+    {
+        // A 60 x 60 µm plate pair on the shipped 0.2 µm film, fed on Metal1 at both ends. The size
+        // is the one a 1.0838 pF part is drawn at and the one MIM-12 measured.
+        //
+        // WHAT IS PAST THE FLOOR IS THE GEOMETRY AGAINST THE FILM, NOT THE TECHNOLOGY, and this
+        // fixture is deliberately the one that shows it. Both of this file's other 0.2 µm
+        // capacitors are let through and correctly so: the 10 µm plate meshes at cell/separation
+        // 12.5, and the via-strapped 60 µm one at 18.3, because the MIM Via and the Metal2 strap
+        // put gridlines INSIDE the plate and cut the straddling cell to 3.667 µm. Take those away
+        // and the plate is one 60 µm cell wide.
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        foreach (var shape in (List<LayoutShape>)
+        [
+            Rect(Metal1,    0, 124, 100, 140),   // feed in
+            Rect(Metal1,  100, 100, 164, 164),   // bottom plate
+            Rect(Metal1,  164, 124, 264, 140),   // feed out
+            Rect(MimMetal, 102, 102, 162, 162),  // top plate
+            Port(Metal1,    0, 132, "P1"),
+            Port(Metal1,  264, 132, "P2"),
+        ]) view.Shapes.Add(shape);
+
+        var pre = EmRunService.Preflight(
+            new EmSetup
+            {
+                Name       = "mim",
+                LayoutRef  = "mim.clay",
+                PlanarMesh = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false),
+                Frequency  = new Core.Design.FrequencySpec("1", "1", 1, Core.Design.SweepKind.Linear,
+                                                           "GHz", "GHz"),
+            },
+            new EmLayoutSource("mim.clay", view, StarterTechnologies.MmicGaAs(), Dbu));
+
+        output.WriteLine(pre.Refusal ?? "(not refused)");
+        Assert.False(pre.Ok);
+        Assert.Contains("full-wave floor of 40", pre.Refusal!, StringComparison.Ordinal);
+        Assert.Contains("thicken the film", pre.Refusal!, StringComparison.Ordinal);
+
+        // The scale sentence rides with it rather than being replaced by it.
+        Assert.Contains(pre.Findings, f => f.Text.Contains("CELL/SEPARATION", StringComparison.Ordinal));
+    }
+
     private static PlanarExtractionResult MicrostripOn(Technology tech)
     {
         var r = PlanarExtractor.Extract(

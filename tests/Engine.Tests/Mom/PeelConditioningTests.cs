@@ -414,7 +414,7 @@ public sealed class PeelConditioningTests(ITestOutputHelper output)
                     Assert.Equal(plain.Points[i].S[r, c], open.Points[i].S[r, c]);
         }
 
-        Assert.DoesNotContain(plain.Notes, n => n.Contains("DeembedErrorFloor"));
+        Assert.DoesNotContain(plain.Notes, n => n.Contains("The DeembedErrorFloor result estimates"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -495,7 +495,10 @@ public sealed class PeelConditioningTests(ITestOutputHelper output)
         // Both walls are named, and they are named SEPARATELY — the fit's sentence used to be the
         // only one down there, and it reads as "trouble ends here" when it is a ceiling on one wall.
         var conduction = Assert.Single(run.Notes, n => n.Contains("the field solver has no valid range"));
-        var peel = Assert.Single(run.Notes, n => n.Contains("DeembedErrorFloor"));
+        // MIM-9 named the counter in the NOT PASSIVE attribution too — deliberately, so a reader
+        // told the peel is or is not the cause knows which diagnostic says so. The sentinel here is
+        // the peel-conditioning note's OWN closing clause, which is what this line always meant.
+        var peel = Assert.Single(run.Notes, n => n.Contains("The DeembedErrorFloor result estimates"));
         output.WriteLine(conduction);
         output.WriteLine(peel);
         Assert.Contains("the field solver has no valid range", conduction);

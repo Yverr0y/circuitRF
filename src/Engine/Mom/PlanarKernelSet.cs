@@ -173,6 +173,49 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     public const double ValidatedCellOverSeparation = 200.0;
 
     /// <summary>
+    /// <b>MIM-9 / R-emsev-4 — how large a CELL may be against the SEPARATION between two conductor
+    /// levels before the FULL-WAVE two-port stops being an answer. A REFUSAL, and a different
+    /// quantity from <see cref="ValidatedCellOverSeparation"/> above.</b>
+    ///
+    /// <para><b>The two constants do not measure the same thing and that is the whole point of
+    /// there being two.</b> 200 is the range the cross-level FILL and the ELECTROSTATIC plate
+    /// capacitance are measured over — <c>PlanarFill.ScalarPotentialMatrix</c> driven by a 1 V / 0 V
+    /// instrument with no port in it. 40 is the range a DE-EMBEDDED s-parameter is measured over,
+    /// which is what a user actually reads, and it is five times tighter. Quoting the first at
+    /// someone reading the second is the defect MIM-9 exists to fix: a run whose published capacitor
+    /// had the wrong SIGN was being told its capacitance was within 1 %.</para>
+    ///
+    /// <para><b>The ladder, measured 2026-09-16</b> (MIM-12). One 60 × 60 µm plate pair, one set of
+    /// feeds, one set of ports, the straddling cell pinned at 40 µm on every rung, and only the film
+    /// thickness moving — so cell/separation is the only axis. <c>C</c> is the series arm read back
+    /// from the de-embedded two-port as <c>−1/Y₂₁</c>, against ε₀εᵣA/d:</para>
+    ///
+    /// <list type="table">
+    ///   <item><term>cell/sep 20 (d = 2 µm)</term><description>σ_max 0.998, C = 1.12 / 1.13 / 1.15 at 1 / 2 / 3 GHz — correct, the excess is plate fringing</description></item>
+    ///   <item><term>cell/sep 40 (d = 1 µm)</term><description>σ_max 0.998, C = 1.27 / 1.05 / 1.13</description></item>
+    ///   <item><term>cell/sep 80 (d = 0.5 µm)</term><description>σ_max 1.04-1.09, C = −0.93 / −1.02 / −1.10 — magnitude right, SIGN INVERTED</description></item>
+    ///   <item><term>cell/sep 200 (d = 0.2 µm)</term><description>σ_max 1.04-1.73, C = −0.84 / −1.52 / +5.90 — incoherent</description></item>
+    /// </list>
+    ///
+    /// <para><b>It is a REFUSAL rather than a note because of what the answer looks like past it.</b>
+    /// R-prt-13's "report the number, not the verdict" habit is right where the failure is visible:
+    /// a note is enough when the reader can see something is wrong. Here the run produces a
+    /// complete, smooth, reciprocal, plausible two-port whose capacitor is an inductor, and no mesh
+    /// control reaches it — 2, 4 and 8 cells across give 1.7322, 1.7439, 1.7491, i.e. a CONVERGED
+    /// wrong answer moving slightly the wrong way. This is <c>PlanarLevels.CanRepresentVias</c>'
+    /// own argument, in its own words: approximating it would give a plausible wrong inductance
+    /// rather than an obvious failure, which is why it is refused.</para>
+    ///
+    /// <para><b>MIM-12 WILL MOVE THIS NUMBER, and moving it is the expected outcome rather than a
+    /// rework.</b> The cause is a dynamic-range failure — on the 60 µm pair at 0.5 GHz the smallest
+    /// eigenvalue of Re(Z) is 5.7e-8 against a largest of 4.06e3, and cond(Z) is 1.4e9 — and the
+    /// remedies for it are MIM-12's own. Re-point this one constant at whatever that brief reaches
+    /// and leave the refusal standing; a fix that REMOVES the refusal instead of moving it is how
+    /// the next regime becomes silent.</para>
+    /// </summary>
+    public const double FullWaveCellOverSeparation = 40.0;
+
+    /// <summary>
     /// The refusal, and it is now earned on ONE quantity rather than two.
     ///
     /// <para><b>L9e's geometric bound (<c>MaxLengthOverWidth = 0.5</c>) is RETIRED.</b> It existed

@@ -13,6 +13,7 @@
 // not 6 cores and 6 models.
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using NumFlat;
 using RfCore;
@@ -1180,6 +1181,24 @@ public sealed class PlanarPortCalibrator
 public sealed record PlanarPassivityExcess(double FrequencyHz, double SigmaMax);
 
 /// <summary>
+/// <b>MIM-3 / MIM-8 / MIM-9 — one adjacent pair of conductor levels, and the largest mesh cell that
+/// straddles them.</b> <see cref="CellOverSeparation"/> is the quantity both bounds are drawn on:
+/// <see cref="PlanarLevels.FullWaveCellOverSeparation"/> (a refusal, on the de-embedded two-port)
+/// and <see cref="PlanarLevels.ValidatedCellOverSeparation"/> (a note, on the cross-level fill and
+/// the electrostatic plate capacitance). Those are different quantities measured over different
+/// ranges, which is why there are two constants and why a run past the first is refused while a run
+/// past only the second is not.
+/// </summary>
+/// <param name="Lower">Index of the lower of the two levels; the upper is <c>Lower + 1</c>.</param>
+/// <param name="SeparationM">Their vertical separation, metres.</param>
+/// <param name="CellM">The largest cell dimension over the two levels' own cells, metres — never
+/// the mesh's largest cell anywhere, which would grade a plate pair on an unrelated conductor.</param>
+public readonly record struct PlanarLevelPair(int Lower, double SeparationM, double CellM)
+{
+    public double CellOverSeparation => CellM / SeparationM;
+}
+
+/// <summary>
 /// What one de-embedded frequency point cost and produced.
 ///
 /// <para><b>M2 — these are PER-SOLVE times and they no longer sum to wall clock.</b> The DUT and the
@@ -1293,6 +1312,18 @@ public sealed class PlanarSolveResult
     /// is made from, handed to the caller so it can reach the file the notes do not.
     /// </summary>
     public IReadOnlyList<PlanarPassivityExcess> NonPassivePoints { get; init; } = [];
+
+    /// <summary>
+    /// <b>MIM-9 item 4 — WHY those points are not a network, decided once and read twice.</b> Empty
+    /// when the whole sweep is a network.
+    ///
+    /// <para>The run's own NOT PASSIVE note and the caveat <c>EmSnpProvenance</c> stamps into the
+    /// <c>.sNp</c> both end in this string. They used to end in two independently written guesses,
+    /// which is how one of them could be corrected and the other go on being wrong in every file
+    /// already on disk. ASCII, because the Touchstone writer transliterates and a subscript comes
+    /// out of it as a question mark. See <see cref="PlanarSolve.NonPassivityCause"/>.</para>
+    /// </summary>
+    public string NonPassivityCause { get; init; } = "";
 
     /// <summary>
     /// <b>ANT-9 — did refinement actually converge?</b> True when every interval that stopped did so
@@ -4000,16 +4031,32 @@ public static class PlanarSolve
         }
 
         IReadOnlyList<PlanarPassivityExcess> nonPassive = [];
+        string nonPassiveCause = "";
         if (st.Deembed)
         {
             nonPassive = PassivityExcesses(points, z0);
+
+            // ── MIM-9 items 1 and 4 — the attribution, decided ONCE, from the run's own counters.
+            //
+            // Computed here rather than inside the note because the .sNp caveat needs the same
+            // string: the notes do not survive onto the file, and the file is what a reader opens
+            // six months later. Both the excess and the peel's own error floor are already in hand
+            // — nothing is solved or re-derived for this.
+            double worstExcess = 0;
+            foreach (var e in nonPassive) worstExcess = Math.Max(worstExcess, e.SigmaMax - 1.0);
+            double worstFloor = 0;
+            foreach (var pt in points) worstFloor = Math.Max(worstFloor, PointFloor(pt));
+            nonPassiveCause = nonPassive.Count == 0
+                ? ""
+                : NonPassivityCause(worstExcess, worstFloor, WorstLevelPair(problem, mesh));
+
             // EM-SEV R-emsev-1 — a WARNING, not a note. This sentence says outright that the
             // s-parameters at those points should not be used, which is the definition of "an
             // answer was produced and something in it is not what was drawn". It reached the
             // Messages panel as Info, ranked level with the core count, because `notes` is a
             // List<EmFinding> and a bare string converts to EmFinding.Note. User-reported
             // 2026-09-16: a run that was 75% non-passive read as thirty ordinary lines.
-            if (PassivityNote(nonPassive, points.Count) is { } passivity)
+            if (PassivityNote(nonPassive, points.Count, nonPassiveCause) is { } passivity)
                 notes.Add(EmFinding.Warn(passivity));
         }
 
@@ -4191,6 +4238,7 @@ public static class PlanarSolve
             CoreBuildMs   = coreBuildMs,
             Findings      = notes,
             NonPassivePoints = nonPassive,
+            NonPassivityCause = nonPassiveCause,
             FeedClearances = clearances,
             CapturedCurrents    = captured,
             CapturedFrequencyHz = capturedF,
@@ -4337,7 +4385,14 @@ public static class PlanarSolve
         return over;
     }
 
-    private static string? PassivityNote(IReadOnlyList<PlanarPassivityExcess> over, int pointCount)
+    /// <param name="attribution">
+    /// The cause clause, from <see cref="NonPassivityCause"/> — the one place it is decided. It is a
+    /// PARAMETER rather than a call from inside here because the same string goes onto the
+    /// <c>.sNp</c> through <see cref="PlanarSolveResult.NonPassivityCause"/>, and the two readers
+    /// must not be able to disagree about what the run blamed (MIM-9 item 4).
+    /// </param>
+    private static string? PassivityNote(
+        IReadOnlyList<PlanarPassivityExcess> over, int pointCount, string attribution)
     {
         if (over.Count == 0) return null;
 
@@ -4359,11 +4414,113 @@ public static class PlanarSolve
         return $"NOT PASSIVE: {over.Count} of {pointCount} de-embedded point(s) have σ_max(S) > 1, " +
                $"{which}, worst {worst:F4} at {SurfaceMesher.Eng(atHz)}Hz. A passive structure cannot " +
                "do that, so the excess is this analysis, not your design, and the s-parameters at " +
-               "those points should not be used. The usual cause is the de-embedding rather than the " +
-               "fill: D6's peel divides by a₂₁² (~1e4 at 1 GHz), so a small error in the error box " +
-               "becomes a large one in the answer. Check the port notes above for a feed the " +
-               "calibration could not be measured on, narrow the sweep to where the two-line " +
-               "calibration is well conditioned, or raise Cells per wavelength.";
+               $"those points should not be used. {attribution}";
+    }
+
+    /// <summary>
+    /// <b>MIM-9 items 1 and 4 — WHY the answer is not a network, taken from the run's own counters,
+    /// and written in exactly ONE place.</b>
+    ///
+    /// <para><b>The defect this closes cost a user days.</b> The sentence that shipped named the
+    /// de-embedding as "the usual cause" on every non-passive run, and offered three remedies. On
+    /// the class of run that actually produced it, three of those four clauses are false and the
+    /// engine already computes the numbers that say so:</para>
+    ///
+    /// <list type="bullet">
+    ///   <item><description><b>Not the de-embedding.</b> The identical structure with the second
+    ///   level removed — same artwork, same feeds, same ports, same technology — is passive at
+    ///   σ_max = 0.9986 and reads a fringing capacitance flat to 0.4% over 3:1 in frequency. And the
+    ///   peel's OWN error estimate is the arithmetic that settles it: <c>DeembedErrorFloor</c>
+    ///   1.6e-3 against a non-passivity excess of 0.73, three decades apart.</description></item>
+    ///   <item><description><b>No well-conditioned sub-band to narrow to.</b> Non-passive at 1, 2
+    ///   and 3 GHz alike, incoherent below 1 GHz.</description></item>
+    ///   <item><description><b>Cells per wavelength is inert.</b> 20 → 400 leaves σ_max at 1.0443,
+    ///   unchanged to four decimals.</description></item>
+    /// </list>
+    ///
+    /// <para><b>So the attribution follows the counters rather than a fixed guess</b>, and it is a
+    /// separate function from the sentence around it for the reason item 4 gives: the guess was
+    /// written TWICE, here and in <c>EmSnpProvenance.ValidityCaveats</c>, independently. The second
+    /// copy outlives the session — it is stamped into the <c>.sNp</c> and is the first thing anyone
+    /// reads six months later — so fixing one and not the other would leave every file already
+    /// written saying the wrong thing. This is computed once per run and carried on
+    /// <see cref="PlanarSolveResult.NonPassivityCause"/>; both readers take it from there.</para>
+    ///
+    /// <para><b>ASCII, deliberately, and it costs the panel a subscript.</b> Touchstone is written
+    /// in an encoding <c>EmSnpProvenance</c> transliterates to, and a σ or an a₂₁ comes out of it as
+    /// "?" — measured on that very line. One function producing two spellings is two chances to
+    /// drift; one function producing one string that both surfaces can carry is not.</para>
+    /// </summary>
+    /// <param name="excess">The worst σ_max − 1 over the sweep: how much gain has to be explained.</param>
+    /// <param name="peelErrorFloor">The worst <see cref="PlanarErrorBox.DeembedErrorFloor"/> over the
+    /// sweep — the peel's own estimate of its own error, in |S|, and therefore the one number that
+    /// can say whether the de-embedding is even capable of accounting for the excess.</param>
+    /// <param name="pair">The worst adjacent level pair, when the mesh has one.</param>
+    internal static string NonPassivityCause(
+        double excess, double peelErrorFloor, PlanarLevelPair? pair)
+    {
+        // Microns spelled out rather than through PlanarLengthFormat, and that is the ASCII rule
+        // above rather than an oversight: every length format in this area reaches for "µ", which is
+        // the one character the Touchstone writer cannot carry. The panel loses the document's own
+        // unit on this one clause; the file gains a caveat that can be read.
+        static string Um(double m) =>
+            (m * 1e6).ToString("G4", CultureInfo.InvariantCulture) + " um";
+
+        // ── 1. A CONDUCTOR PAIR PAST THE FULL-WAVE FLOOR ────────────────────────────────────────
+        //
+        // Asked first because it is a property of the STRUCTURE and dominates whatever else is true
+        // of the sweep. PlanarSolve.Run cannot reach this arm today — LevelSeparationVerdict refuses
+        // such a run before a matrix is filled — and it is here rather than deleted because
+        // FullWaveCellOverSeparation is a measurement's name and MIM-12 will raise it. When it does,
+        // the band between the old floor and the new one becomes runnable and this is the sentence
+        // those runs need. It is reached today through this function's own gate, and through any
+        // caller that measures a sweep it did not solve.
+        if (pair is { } lp && lp.CellOverSeparation > PlanarLevels.FullWaveCellOverSeparation)
+            return $"The cause is the conductor pair at levels {lp.Lower} and {lp.Lower + 1}, " +
+                   $"{Um(lp.SeparationM)} apart with a straddling cell of {Um(lp.CellM)} - " +
+                   $"cell/separation = {lp.CellOverSeparation:G3}, past the " +
+                   $"{PlanarLevels.FullWaveCellOverSeparation} a de-embedded two-port of a close " +
+                   $"level pair is measured over. Past that floor the series element between the " +
+                   $"two levels loses its magnitude and then its sign, and the gain you are seeing " +
+                   $"is what that looks like in S. Thicken the film between those levels in the " +
+                   $"technology, or take the upper level out of the EM run and model the part it " +
+                   $"carries as a circuit element. Refining the mesh does NOT act here and has been " +
+                   $"measured not to: Cells per wavelength 20 to 400 leaves sigma_max unchanged to " +
+                   $"four decimals, and 2 to 8 cells across the conductor moves it the wrong way.";
+
+        // ── 2. THE DE-EMBEDDING, WHEN ITS OWN COUNTERS CAN ACCOUNT FOR THE EXCESS ───────────────
+        //
+        // The sentence that shipped, kept verbatim in substance, because it is right for the case it
+        // was written for — the shipped spiral's bottom decade, where the floor genuinely reaches
+        // the size of the excess. What changed is that it is now EARNED. DeembedErrorFloor is the
+        // peel's own estimate of its own error in |S|; where it is at least the excess, the peel can
+        // produce that much gain on its own and is the first thing to check. Where it is decades
+        // below, it arithmetically cannot, and saying so anyway is the misdiagnosis.
+        if (peelErrorFloor >= excess && excess > 0)
+            return "The usual cause on a run like this one is the de-embedding rather than the " +
+                   "fill: the peel divides by a21 squared (~1e4 at 1 GHz), so a small error in the " +
+                   "error box becomes a large one in the answer - and the peel's own estimate of " +
+                   $"that error, DeembedErrorFloor, reads {peelErrorFloor:G3} in |S| here against " +
+                   $"an excess of {excess:G3}, so it is large enough to be the whole of it. Check " +
+                   "the port notes above for a feed the calibration could not be measured on, or " +
+                   "narrow the sweep to where the two-line calibration is well conditioned.";
+
+        // ── 3. NOT ATTRIBUTED, AND SAYING SO IS THE POINT ───────────────────────────────────────
+        //
+        // The honest answer when neither of the two above holds, and the one the shipped sentence
+        // never had: it named a cause anyway. The number it exonerates the peel WITH is quoted,
+        // because a reader who has been told "not the de-embedding" will otherwise go and check it.
+        string peel = peelErrorFloor > 0
+            ? $"It is NOT the de-embedding: the peel's own estimate of its own error, " +
+              $"DeembedErrorFloor, reads {peelErrorFloor:G3} in |S| here against an excess of " +
+              $"{excess:G3} - too small to account for it by " +
+              $"{(excess / peelErrorFloor):G3}x."
+            : "The de-embedding reports no error floor on this sweep, so it is not the cause.";
+
+        return peel + " The other thing this run can attribute an excess to - a conductor pair too " +
+               "close together for the cells that straddle it - is ruled out as well, so what " +
+               "produced the gain is not identified here. Do not read the flagged points; the rest " +
+               "of the sweep is unaffected.";
     }
 
     /// <summary>
@@ -4711,10 +4868,125 @@ public static class PlanarSolve
               $"components — this is a note rather than a refusal because 'unmeasured' is what it " +
               $"is, and refusing on it would be inventing a limit rather than reporting one.");
 
-        // ── MIM-3 / MIM-8 — the CELL against the LEVEL SEPARATION. A note, never a refusal ───
+        // ── MIM-3 / MIM-8 / MIM-9 — the CELL against the LEVEL SEPARATION ───────────────────────
+        //
+        // The note first, then the verdict, and the ORDER is the point: past the full-wave floor the
+        // caller gets both, so whatever surfaces the refusal has the sentence explaining the scale
+        // beside it rather than a bare number. VerticalRangeVerdict's own contract already returns
+        // the notes alongside a refusal (the vertical-range arm above does the same).
         notes.AddRange(LevelSeparationNotes(problem, mesh, fHiHz, fmt));
 
+        if (LevelSeparationVerdict(problem, mesh, fmt) is { Ok: false } tooThin)
+            return (tooThin, notes);
+
         return (EmSuitability.Yes, notes);
+    }
+
+    /// <summary>
+    /// <b>MIM-3 / MIM-8 / MIM-9 — the adjacent conductor-level pair whose own cells resolve their
+    /// own separation WORST, and the one measurement three different consumers ask for.</b>
+    ///
+    /// <para>It is asked per ADJACENT LEVEL PAIR and over the cells that actually sit on those two
+    /// levels, because that is the only place the cross-level block is evaluated — R-zz-1's own
+    /// discipline. Reporting the mesh's largest cell anywhere would grade a plate pair on a cell
+    /// belonging to some unrelated wide conductor.</para>
+    ///
+    /// <para><b>It is one function because it feeds three answers that must not be able to
+    /// disagree</b>: <see cref="LevelSeparationVerdict"/>'s refusal, <see cref="LevelSeparationNotes"/>'
+    /// note, and the attribution the NOT PASSIVE sentence takes (<see cref="NonPassivityCause"/>).
+    /// A run that refuses on one ratio and explains itself with another is worse than either.</para>
+    ///
+    /// <para>Null when there is no such pair: a single-level problem, or one whose levels have no
+    /// meshed cells on them.</para>
+    /// </summary>
+    public static PlanarLevelPair? WorstLevelPair(PlanarProblem problem, PlanarMesh mesh)
+    {
+        ArgumentNullException.ThrowIfNull(problem);
+        ArgumentNullException.ThrowIfNull(mesh);
+
+        var levels = PlanarLevels.From(problem);
+        if (levels.Z.Count < 2) return null;
+
+        PlanarLevelPair? worst = null;
+        for (int lo = 0; lo + 1 < levels.Z.Count; lo++)
+        {
+            double sep = Math.Abs(levels.Z[lo + 1] - levels.Z[lo]);
+            if (!(sep > 0)) continue;
+
+            double cell = 0;
+            foreach (var c in mesh.Cells)
+            {
+                if (c.LayerIndex != lo && c.LayerIndex != lo + 1) continue;
+                cell = Math.Max(cell, Math.Max(c.Width, c.Height));
+            }
+            if (!(cell > 0)) continue;
+
+            var here = new PlanarLevelPair(lo, sep, cell);
+            if (worst is { } w && here.CellOverSeparation <= w.CellOverSeparation) continue;
+            worst = here;
+        }
+        return worst;
+    }
+
+    /// <summary>
+    /// <b>MIM-9 item 3 / EM-SEV R-emsev-4 — the FULL-WAVE floor, and it is a REFUSAL.</b>
+    ///
+    /// <para><b>Why it is not the note one line down.</b> MIM-8's bound of 200 certifies the
+    /// cross-level FILL and the ELECTROSTATIC plate capacitance, and both of those are true at 200
+    /// today. Neither of them is a de-embedded s-parameter, which is what a user reads. MIM-12
+    /// measured that one — same plate, same feeds, same ports, the straddling cell pinned, only the
+    /// film thickness moving — and it is correct to cell/separation 40, sign-INVERTED by 80 and
+    /// noise at 200. The shipped MMIC technology's own 0.2 µm film puts every capacitor on it at
+    /// 200.</para>
+    ///
+    /// <para><b>R-emsev-4 was deferred once, conditionally, and the condition has now been met from
+    /// the other side.</b> MIM-8 declined to build it because past its own bound the answer was
+    /// UNMEASURED rather than wrong, and refusing on "unmeasured" would be inventing a limit rather
+    /// than reporting one. The measurement now exists and it does not say unmeasured: it says the
+    /// element inverts its sign. So the refusal is earned, in exactly the words
+    /// <see cref="PlanarLevels.CanRepresentVias"/> earns its own with — a plausible wrong answer
+    /// rather than an obvious failure.</para>
+    ///
+    /// <para><b>It names only the remedies that ACT</b> (§3.5's trap, and MIM-9 item 1's whole
+    /// subject). The two mesh knobs were measured directly on this structure and are inert: Cells
+    /// per wavelength 20 → 400 leaves σ_max at 1.0443, unchanged to four decimals, because that knob
+    /// sets the pitch ALONG the current while the plate's own width sets it across; and 2 → 4 → 8
+    /// cells across the conductor moves σ_max from 1.7322 to 1.7491, slightly the WRONG way.</para>
+    ///
+    /// <para>Separate from <see cref="LevelSeparationNotes"/> so a caller can have the verdict
+    /// without the prose and vice versa, which is what <c>EmRunService.Preflight</c> and
+    /// <c>circuitrf check</c> need: they report the refusal and the findings together.</para>
+    /// </summary>
+    public static EmSuitability LevelSeparationVerdict(
+        PlanarProblem problem, PlanarMesh mesh,
+        SurfaceMesher.PlanarLengthFormat? lengthFormat = null)
+    {
+        if (WorstLevelPair(problem, mesh) is not { } pair) return EmSuitability.Yes;
+        if (pair.CellOverSeparation <= PlanarLevels.FullWaveCellOverSeparation)
+            return EmSuitability.Yes;
+
+        var fmt = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
+        return EmSuitability.No(
+            $"Conductor levels {pair.Lower} and {pair.Lower + 1} are {fmt(pair.SeparationM)} apart " +
+            $"and the largest cell straddling them is {fmt(pair.CellM)}, i.e. cell/separation = " +
+            $"{pair.CellOverSeparation:G3}, past this solve's measured full-wave floor of " +
+            $"{PlanarLevels.FullWaveCellOverSeparation}. Below that floor the de-embedded two-port " +
+            $"of a pair this close is measured correct; by 80 the series element it publishes has " +
+            $"the wrong SIGN — a capacitor reads as an inductor — and at 200 it is noise. MIM-12's " +
+            $"ladder, one plate pair with only the film thickness moving: C/(ε₀εᵣA/d) = 1.13 at " +
+            $"cell/separation 20 and 1.05 at 40, then −1.02 at 80 and −1.52 at 200. Approximating " +
+            $"it would give a plausible wrong capacitance rather than an obvious failure, which is " +
+            $"why it is refused. What acts on this: thicken the film between these two levels in " +
+            $"the technology, or take the upper level out of the EM run and model the part it " +
+            $"carries as a circuit element beside the EM result. What does NOT act, measured on " +
+            $"this structure rather than assumed: Cells per wavelength (20 → 400 leaves σ_max " +
+            $"unchanged to four decimals, because that knob sets the pitch ALONG the current and " +
+            $"the plate's own width sets it across), Min cells across conductor (2 → 4 → 8 moves " +
+            $"σ_max from 1.7322 to 1.7491, slightly the wrong way), and narrowing the sweep (the " +
+            $"run is non-passive at 1, 2 and 3 GHz alike and incoherent below 1 GHz). The " +
+            $"cross-level FILL and the electrostatic plate capacitance ARE measured accurate at " +
+            $"this ratio — neither of those is a de-embedded s-parameter, which is the distinction " +
+            $"this refusal exists to make.");
     }
 
     /// <summary>
@@ -4757,31 +5029,11 @@ public static class PlanarSolve
         ArgumentNullException.ThrowIfNull(mesh);
         var notes = new List<EmFinding>();
         var fmt   = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
-        var levels = PlanarLevels.From(problem);
-        if (levels.Z.Count < 2) return notes;
+        if (WorstLevelPair(problem, mesh) is not { } pair) return notes;
 
-        double worstRatio = 0, worstSep = 0, worstCell = 0;
-        int worstLo = -1;
-
-        for (int lo = 0; lo + 1 < levels.Z.Count; lo++)
-        {
-            double sep = Math.Abs(levels.Z[lo + 1] - levels.Z[lo]);
-            if (!(sep > 0)) continue;
-
-            double cell = 0;
-            foreach (var c in mesh.Cells)
-            {
-                if (c.LayerIndex != lo && c.LayerIndex != lo + 1) continue;
-                cell = Math.Max(cell, Math.Max(c.Width, c.Height));
-            }
-            if (!(cell > 0)) continue;
-
-            double ratio = cell / sep;
-            if (ratio <= worstRatio) continue;
-            worstRatio = ratio; worstSep = sep; worstCell = cell; worstLo = lo;
-        }
-
-        if (worstLo < 0) return notes;
+        double worstRatio = pair.CellOverSeparation;
+        double worstSep = pair.SeparationM, worstCell = pair.CellM;
+        int    worstLo  = pair.Lower;
 
         // The two frequency knobs reach the cell size ONLY through the λ_g/CellsPerWavelength cap,
         // so the question "do they act here" has an arithmetic answer: what would CellsPerWavelength
@@ -4797,40 +5049,80 @@ public static class PlanarSolve
         string where = $"levels {worstLo} and {worstLo + 1} ({fmt(worstSep)} apart, largest " +
                        $"straddling cell {fmt(worstCell)})";
 
-        if (worstRatio <= PlanarLevels.ValidatedCellOverSeparation)
+        // ── MIM-9 item 2 — THE REASSURING CLAUSE IS THE NARROWEST OF THE THREE ARMS, AND IT WAS
+        //    THE WIDEST ────────────────────────────────────────────────────────────────────────
+        //
+        // This sentence used to fire at every ratio up to 200, and every clause in it was true: the
+        // cross-level fill IS measured over that range and so IS the electrostatic plate
+        // capacitance. It was still the most misleading line in the run, because MIM-8's validation
+        // is ELECTROSTATIC — ScalarPotentialMatrix with a 1 V / 0 V instrument and no port in it —
+        // and the quantity a user reads is a de-embedded s-parameter. A run whose published
+        // capacitor had the WRONG SIGN was being told its capacitance was within 1%.
+        //
+        // So "resolved by the mesh" is now said only where the FULL-WAVE answer is measured too,
+        // and past that the note states what was validated and what was not, in those words.
+        if (worstRatio <= PlanarLevels.FullWaveCellOverSeparation)
         {
             notes.Add(
                 $"The closest conductor levels are resolved by the mesh: cell/separation = " +
                 $"{worstRatio:G3} at {where}, inside the " +
+                $"{PlanarLevels.FullWaveCellOverSeparation} the de-embedded two-port of a close " +
+                $"level pair is measured over (MIM-12's ladder: the extracted series element within " +
+                $"13% of ε₀εᵣA/d at cell/separation 20 and 40, and passive) and well inside the " +
                 $"{PlanarLevels.ValidatedCellOverSeparation} MIM-8 measured the cross-level fill " +
-                $"over (≤ 1.7e-4 against forced-high quadrature; the extracted plate capacitance " +
-                $"within 1% of ε₀εᵣA/d).");
+                $"over (≤ 1.7e-4 against forced-high quadrature; the extracted ELECTROSTATIC plate " +
+                $"capacitance within 1% of ε₀εᵣA/d).");
+            return notes;
+        }
+
+        if (worstRatio <= PlanarLevels.ValidatedCellOverSeparation)
+        {
+            notes.Add(EmFinding.Warn(
+                $"CELL/SEPARATION = {worstRatio:G3} at {where}. The cross-level FILL is measured " +
+                $"over this range (≤ 1.7e-4 against forced-high quadrature, out to " +
+                $"{PlanarLevels.ValidatedCellOverSeparation}) and so is the ELECTROSTATIC plate " +
+                $"capacitance (within 1% of ε₀εᵣA/d). NEITHER OF THOSE IS A DE-EMBEDDED " +
+                $"S-PARAMETER. The full-wave two-port for a pair this close is measured accurate " +
+                $"only to cell/separation {PlanarLevels.FullWaveCellOverSeparation}; past that the " +
+                $"published series element loses its magnitude and then its sign (MIM-12's ladder: " +
+                $"C/(ε₀εᵣA/d) = 1.05 at 40, −1.02 at 80, −1.52 at 200). That is why a full-wave " +
+                $"solve on this structure is refused rather than published — see the refusal for " +
+                $"the remedies that act."));
             return notes;
         }
 
         // EM-SEV R-emsev-4 — a WARNING, and the capitals this sentence already carried were the
         // author reaching for a severity the type system did not have. The brief also asked for a
         // REFUSAL past the wrong-sign rung, CONDITIONAL on MIM-8 being declined; MIM-8 landed, the
-        // peak is subtracted in closed form, and the ladder now holds to cell/separation 200 with
-        // nothing measured beyond it. There is no wrong-sign rung left to refuse on, and refusing on
-        // "unmeasured" would be inventing a limit rather than reporting one (R-prt-13). So the
-        // warning is the whole of it, and it says what it means: past the bound the dominant
-        // cross-level coupling — a thin film's plate capacitance above all — is the part of this
-        // answer nothing has checked.
+        // peak is subtracted in closed form, and the FILL's ladder now holds to cell/separation 200
+        // with nothing measured beyond it. That is still true and every number below is unchanged.
+        //
+        // ── MIM-9 — AND THE REFUSAL IS NOW BUILT, BECAUSE THE WRONG-SIGN RUNG CAME BACK ON A
+        //    DIFFERENT QUANTITY. The fill is not the thing a user reads. MIM-12 measured the
+        //    DE-EMBEDDED two-port over the same axis and it inverts the sign of the series element
+        //    between cell/separation 40 and 80 — so "unmeasured" is no longer what the evidence
+        //    says, and LevelSeparationVerdict refuses. This warning is what accompanies that
+        //    refusal, and the two arms above it are the rest of the same scale. The first clause
+        //    below is the full-wave one because past 200 BOTH statements are true at once and the
+        //    full-wave one is the one that decides whether there is an answer at all.
         notes.Add(EmFinding.Warn(
-            $"CELL/SEPARATION = {worstRatio:G3} at {where}, PAST the " +
+            $"CELL/SEPARATION = {worstRatio:G3} at {where}, past the " +
+            $"{PlanarLevels.FullWaveCellOverSeparation} a de-embedded two-port of a close level " +
+            $"pair is measured over — which is why this run is refused — and also past the " +
             $"{PlanarLevels.ValidatedCellOverSeparation} the cross-level fill is measured over. " +
             $"MIM-8 subtracts the peak a cross-level entry carries — one of width {fmt(worstSep)} " +
             $"inside a cell of {fmt(worstCell)} — and integrates it in closed form, which held the " +
             $"cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 against forced-high " +
-            $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the capacitance extracted " +
-            $"from a plate pair within 1% of ε₀εᵣA/d over the whole of it — 1.003 at cell/separation " +
+            $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the ELECTROSTATIC " +
+            $"capacitance extracted from a plate pair — no port in it — within 1% of ε₀εᵣA/d over " +
+            $"the whole of it: 1.003 at cell/separation " +
             $"75 and 0.996 at 300, where before it read −0.046 and −0.003. Past " +
-            $"{PlanarLevels.ValidatedCellOverSeparation} nothing was measured, and that is all this " +
-            $"says: a coarser mesh is not known to be wrong, it is unmeasured. Nothing downstream " +
-            $"would show it either way: " +
-            $"reciprocity and passivity hold throughout. What acts on this is the CELL PITCH " +
-            $"across the metal on those two levels. " +
+            $"{PlanarLevels.ValidatedCellOverSeparation} the FILL was not measured, and that half " +
+            $"is unmeasured rather than known wrong. The FULL-WAVE answer is the other half and it " +
+            $"is measured: past {PlanarLevels.FullWaveCellOverSeparation} the series element " +
+            $"between these two levels loses its magnitude and then its sign, and passivity goes " +
+            $"with it (σ_max up to 1.73 on the plate pair MIM-12 measured). What acts on this is " +
+            $"the CELL PITCH across the metal on those two levels. " +
             "That pitch is min(λ_g/CellsPerWavelength, width/MinCellsAcrossConductor), " +
             $"and only the first term responds to the frequency knobs" +
             (double.IsFinite(cellsPerWavelengthNeeded) && cellsPerWavelengthNeeded > 200

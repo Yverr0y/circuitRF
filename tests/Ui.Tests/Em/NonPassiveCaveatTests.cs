@@ -10,6 +10,7 @@
 // would be gating the sweep rather than the sentence.
 
 using System.Numerics;
+using System.Text.RegularExpressions;
 using CircuitRF.Design.Layout.Em;
 using CircuitRF.Engine.Mom;
 using NumFlat;
@@ -21,16 +22,24 @@ namespace CircuitRF.Ui.Tests.Em;
 public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
 {
     private static PlanarSolveResult Result(params PlanarPassivityExcess[] nonPassive) =>
+        Result(Cause, nonPassive);
+
+    private static PlanarSolveResult Result(string cause, params PlanarPassivityExcess[] nonPassive) =>
         new()
         {
-            Points           = [],
-            CoreFillCount    = 0,
-            UnknownCount     = 0,
-            StandardCount    = 0,
-            CoreBuildMs      = 0,
-            Findings         = [],
-            NonPassivePoints = nonPassive,
+            Points            = [],
+            CoreFillCount     = 0,
+            UnknownCount      = 0,
+            StandardCount     = 0,
+            CoreBuildMs       = 0,
+            Findings          = [],
+            NonPassivePoints  = nonPassive,
+            NonPassivityCause = nonPassive.Length == 0 ? "" : cause,
         };
+
+    /// <summary>A stand-in for whatever <c>PlanarSolve.NonPassivityCause</c> decided. The point of
+    /// MIM-9 item 4 is that this file does not get to invent one, so the fixture supplies it.</summary>
+    private const string Cause = "It is NOT the de-embedding: DeembedErrorFloor reads 0.0016.";
 
     [Fact]
     public void APassiveSweepDeclaresNothing()
@@ -58,7 +67,15 @@ public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
         Assert.Contains("160 MHz", caveat, StringComparison.Ordinal);
         Assert.Contains("640 MHz", caveat, StringComparison.Ordinal);
         Assert.Contains("1.0919", caveat, StringComparison.Ordinal);
-        Assert.Contains("lower edge", caveat, StringComparison.Ordinal);
+
+        // ── MIM-9 item 4 — THE CAUSE IS CARRIED, NOT RE-GUESSED ────────────────────────────────
+        //
+        // What used to follow "the excess is this analysis rather than the design" was a second,
+        // independently written sentence blaming the de-embedding's peel — a copy of the one in
+        // PlanarSolve's panel note. MIM-9 corrected the panel; this copy would have gone on saying
+        // the old thing in every .sNp ever written, which is the copy that outlives the session.
+        Assert.Contains(Cause, caveat, StringComparison.Ordinal);
+        Assert.DoesNotContain("peel divides by", caveat, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -69,6 +86,8 @@ public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
     [Fact]
     public void TheCaveatSurvivesTheTouchstonesOwnEncoding()
     {
+        // The attribution half of this line now comes from the engine, and its own ASCII gate is
+        // MimThinLayerTests.M9_3 — this one still holds the half written here.
         string caveat = Assert.Single(EmSnpProvenance.ValidityCaveats(
             Result(new PlanarPassivityExcess(1.6e8, 1.09))));
 
@@ -104,6 +123,54 @@ public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
         Assert.Contains("OUTSIDE", caveats[0], StringComparison.Ordinal);
         Assert.Contains("NOT A PASSIVE NETWORK", caveats[1], StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// <b>MIM-9 item 4 — the guess was written TWICE, in two files, independently, and this is what
+    /// stops a third.</b>
+    ///
+    /// <para><c>PlanarSolve</c> built the panel sentence and <c>EmSnpProvenance</c> built its own for
+    /// the <c>.sNp</c> header. Both said the de-embedding's peel was the cause; MIM-12's controls
+    /// showed it was not. Correcting one leaves the other wrong in every file already on disk — and
+    /// the file is the copy that outlives the session. On <c>Authoring.cs</c>' terms: a scan of the
+    /// comment-stripped sources, because a rule stated in prose is a rule that gets copied past.</para>
+    /// </summary>
+    [Fact]
+    public void TheAttributionIsWrittenInExactlyOnePlace()
+    {
+        var offenders = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(
+                     Path.Combine(RepoRoot(), "src"), "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")) continue;
+            string code = StripComments(File.ReadAllText(file));
+            if (code.Contains("de-embedding rather than the", StringComparison.Ordinal))
+                offenders.Add(Path.GetRelativePath(RepoRoot(), file));
+        }
+
+        string only = Assert.Single(offenders);
+        Assert.Equal(Path.Combine("src", "Engine", "Mom", "PlanarSolve.cs"), only);
+
+        // And the file that used to carry the second copy reads the decision instead of taking one.
+        string prov = StripComments(File.ReadAllText(Path.Combine(
+            RepoRoot(), "src", "Design", "Layout", "Em", "EmSnpProvenance.cs")));
+        Assert.Contains("solve.NonPassivityCause", prov, StringComparison.Ordinal);
+        Assert.DoesNotContain("peel", prov, StringComparison.Ordinal);
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "circuitrf.slnx")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
+
+    /// <summary>Line and block comments removed, so a source scan cannot be satisfied by prose —
+    /// and the comments in these very files quote the sentence being scanned for.</summary>
+    private static string StripComments(string code)
+        => Regex.Replace(Regex.Replace(code, @"/\*.*?\*/", "", RegexOptions.Singleline),
+                         @"//[^\n]*", "");
 
     private static PlanarProblem PlanarLineForCaveat() =>
         new([new PlanarConductorLayer("Metal1",
