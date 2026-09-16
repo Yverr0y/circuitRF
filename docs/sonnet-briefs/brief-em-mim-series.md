@@ -85,6 +85,52 @@ deviations and one retraction on the record (`src/Ui/RESOLVED.md` §MIM-2):
   off raw S.** Gate a with/without COMPARISON on the same artwork (the discontinuity is common and
   cancels — the L9 phase gate's own shape), or measure de-embedded.
 
+## Second round — MIM-9 … MIM-13 (2026-09-16)
+
+**Origin.** The same user's LC resonator, on the shipped MMIC technology, one day after MIM-8 landed:
+S(1,1) > 1 across the band and no series resonance anywhere. MIM-8 fixed the FILL and the fill is
+measurably right — `C/(ε₀εᵣA/d)` = **1.0032** on that user's plate size at a mesh as coarse as the
+run's. The
+de-embedded two-port of the same capacitor reads **−201 + 174j Ω** where 1.0838 pF is −147j, so the
+capacitor comes back as an inductor with negative resistance.
+
+**These are numbered in the order they should be built, and the order is not the order of
+importance.** MIM-12 is the real fix and it is last, because it is the only one that is weeks rather
+than days and because each of the three before it removes a reason to rush it: MIM-9 makes the engine
+refuse instead of publishing a wrong answer, MIM-10 gives a designer a way to finish the job
+meanwhile, and MIM-11 takes the one confounding factor off the table. **Every measurement the round
+rests on is already taken** and is tabulated in MIM-12; nothing before it needs a new EM sweep.
+
+9. **Say what the run actually did.** Reporting only, on an answer that does not move — so it depends
+   on nothing and is never revisited. The NOT PASSIVE sentence blames the de-embedding while the
+   de-embed's own error floor reads 1.6e-3 against a non-passivity excess of 0.73; the three remedies
+   it offers are measurably inert; the level-separation note *reassures* on the strength of an
+   ELECTROSTATIC validation; and `R-emsev-4`'s refusal, deferred at MIM-8 pending exactly the
+   measurement that now exists, gets built at today's floor of cell/separation 40. **Days.**
+   → **MIM-9.**
+10. **An LC resonator that can be simulated this week.** EM everything except the 0.2 µm gap and
+    insert the closed-form capacitance between the plates — what a MMIC designer does anyway. **Its
+    gating experiment has already been run and came back passive** (σ_max 0.9977 on the coil alone
+    with the capacitor deleted), so most of it is documentation and a kit change. → **MIM-10.**
+11. **The nitride is a mask and there is no mask.** `KIT_MIMCAP` draws no nitride, so the kit is not
+    manufacturable. Independent of everything else, and the film it defines is modelled laterally
+    infinite whatever is drawn — measured cost **0.108° of phase, 2.7 % of a fringing capacitance**,
+    which is worth stating and is not the blocker. → **MIM-11.**
+12. **The full-wave path cannot read back a capacitance the fill gets right.** A dynamic-range
+    failure, not a quadrature one: `Re(Z)`'s smallest eigenvalue is 1.4e-11 of its largest, `cond(Z)`
+    is 1e8–1e9 and rises as frequency falls, and the capacitance is an O(d/h) difference at
+    d/h = 1/200. Excluded by measurement: the mesh (2/4/8 cells across is the same wrong answer), the
+    ports and de-embedding (the same structure minus the second level is passive and flat to 0.4 %),
+    the electrostatic fill, and an active operator. **Weeks. Last.** → **MIM-12.**
+13. **The unknown budget.** Ceilings are 5,000 dense and 12,000 accelerated; the edge fan is
+    expensive on a spiral for a reason the engine already prints; the cell count should be on screen
+    before the solve, not after the refusal. Independent; take it whenever. → **MIM-13.**
+
+**One convention added by this round.** *Never gate a full-wave capability on an electrostatic
+measurement.* MIM-8's instrument is excellent and its 1 % is true; it is simply not a statement about
+a de-embedded s-parameter, and the note that quoted it at a user whose capacitor had the wrong sign
+is the cost of not saying which one was measured.
+
 **Conventions that bind every brief here** (same as `brief-em-perf-series.md`):
 
 - **Write-ups go to the area's `RESOLVED.md` (narrative) and, for engine work,
