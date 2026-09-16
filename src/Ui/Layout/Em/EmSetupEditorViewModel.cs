@@ -1585,6 +1585,9 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PortRefusal        = null;
         PlanarPorts        = [];
         Notes              = [];
+        // EM-SEV R-emsev-6 — cleared with the rest, so a refresh that returns early (no layout, no
+        // technology) cannot leave the previous layout's sentence under the tick boxes.
+        ExcludedArtworkNote = null;
         StackupRows        = [];
         TechnologyName     = "";
         DispersionDisabledReason = "The cross-section has not resolved yet.";

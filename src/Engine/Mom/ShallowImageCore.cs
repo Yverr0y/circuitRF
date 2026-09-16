@@ -56,9 +56,19 @@ public static class ShallowImageCore
     {
         ArgumentNullException.ThrowIfNull(mesh);
         ArgumentNullException.ThrowIfNull(settings);
+        return CellPairMean(mesh.Cells[cellA], mesh.Cells[cellB], depth, settings);
+    }
 
-        var a = mesh.Cells[cellA];
-        var b = mesh.Cells[cellB];
+    /// <summary>
+    /// The same, over two cells the caller already holds — what the ACCELERATED near field reads,
+    /// where a cell pair is addressed by its translation class's synthetic representative rather
+    /// than by a mesh index (<c>PairClassifier</c>).
+    /// </summary>
+    public static Complex CellPairMean(PlanarCell a, PlanarCell b, Complex depth,
+                                       PlanarFillSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
         var (nodes, panels) = PlanarFill.RuleForCells(a, b, settings);
         var (gx, gw) = Legendre.Nodes(nodes);
         var e = PlanarFill.PanelEdgesFor(panels);

@@ -4294,19 +4294,41 @@ public sealed class PlanarPulsePotential
     private readonly PlanarKernelTerms  _termsQ;
     private readonly Func<double, Complex> _remQ;
 
+    // ── MIM-8, on the ACCELERATED path ────────────────────────────────────────────────────────
+    //
+    // The near field and the via border read THIS for their scalar half, so the treatment has to
+    // live here too or an accelerated run is not the dense run's arithmetic. Empty is the ordinary
+    // case and costs one `Count > 0` per entry: `_far*` are then the very objects `_termsQ`/`_remQ`
+    // are, so the branch below cannot change a bit.
+    private readonly IReadOnlyList<ComplexImage> _shallow;
+    private readonly PlanarKernelTerms           _termsQFar;
+    private readonly Func<double, Complex>       _remQFar;
+    private readonly ConcurrentDictionary<long, Complex>       _remQ1Far = new();
+    private readonly ConcurrentDictionary<long, Complex>       _shallow1 = new();
+
     private readonly ConcurrentDictionary<long, Complex>       _remQ1 = new();
     private readonly ConcurrentDictionary<(int, int), Complex> _pCut  = new();
 
     /// <summary>How many distinct translation CLASSES this has integrated, plus any per-pair entries
     /// for pairs with a cut cell.</summary>
-    public int CellPairCount => _remQ1.Count + _pCut.Count;
+    public int CellPairCount => _remQ1.Count + _remQ1Far.Count + _pCut.Count;
 
     /// <summary>The frequency-independent cores this reads.</summary>
     public PlanarEntryCores Geometry => _g;
 
     /// <summary>The re-floored scalar terms this evaluates — read by the static accelerator, which
-    /// has to build its grid kernel table from the SAME floored terms the near entries use.</summary>
+    /// has to build its grid kernel table from the SAME floored terms the near entries use.
+    /// <para><b>This is the TREATED view when MIM-8 subtracted images</b> (see the constructor's
+    /// <c>shallow</c> parameter), so a grid table built from it would be missing them. The static
+    /// accelerator is the only reader and passes no shallow split, so it never is; a caller that
+    /// does must sample <see cref="TermsFar"/> for a grid, exactly as <c>PlanarAimBordered</c>
+    /// does.</para></summary>
     public PlanarKernelTerms Terms => _termsQ;
+
+    /// <summary>The same pairing with nothing subtracted — the WHOLE kernel, and the one a grid
+    /// table has to be sampled from. Identical to <see cref="Terms"/> when nothing was shallow.
+    /// </summary>
+    public PlanarKernelTerms TermsFar => _termsQFar;
 
     /// <param name="remainder">
     /// <b>P12 — the remainder evaluator, when the caller already has the one the dense path built.</b>
@@ -4316,8 +4338,20 @@ public sealed class PlanarPulsePotential
     /// would interpolate an interpolation — which is the reason the dense fill's <c>ZzTerms</c> makes
     /// the same distinction.
     /// </param>
+    /// <param name="shallow">
+    /// <b>MIM-8 — the images <paramref name="termsQ"/> has had subtracted</b>, empty (the default)
+    /// when nothing was. When it is not empty, <paramref name="termsQFar"/> must be the SAME pairing
+    /// with nothing subtracted: a cell pair whose own ρ range never reaches the peak takes that view
+    /// and pays no closed form, exactly as <c>PlanarFill.ScalarPotentialMatrix</c> tiers it. Passing
+    /// a non-empty list without the far view is a programming error and throws, because the
+    /// alternative — silently dropping the images from every entry — is what this parameter exists
+    /// to prevent.
+    /// </param>
     public PlanarPulsePotential(PlanarEntryCores geometry, PlanarKernelTerms termsQ,
-                                Func<double, Complex>? remainder = null)
+                                Func<double, Complex>? remainder = null,
+                                IReadOnlyList<ComplexImage>? shallow = null,
+                                PlanarKernelTerms? termsQFar = null,
+                                Func<double, Complex>? remainderFar = null)
     {
         ArgumentNullException.ThrowIfNull(geometry);
         ArgumentNullException.ThrowIfNull(termsQ);
@@ -4330,6 +4364,18 @@ public sealed class PlanarPulsePotential
         // the same rather than trusting the caller to have done it.
         _termsQ = termsQ.With(_st.Order, geometry.Cores.RhoFloorM);
         _remQ   = remainder ?? PlanarFill.RemainderOf(_termsQ, geometry.Cores);
+
+        _shallow = shallow ?? [];
+        if (_shallow.Count > 0 && termsQFar is null)
+            throw new ArgumentNullException(nameof(termsQFar),
+                "MIM-8: images were subtracted from these terms, so the untreated view of the same " +
+                "pairing is required — without it every far cell pair would silently lose them.");
+        _termsQFar = _shallow.Count > 0
+            ? termsQFar!.With(_st.Order, geometry.Cores.RhoFloorM)
+            : _termsQ;
+        _remQFar = _shallow.Count > 0
+            ? remainderFar ?? PlanarFill.RemainderOf(_termsQFar, geometry.Cores)
+            : _remQ;
     }
 
     /// <summary><c>P[cellA, cellB]</c>, symmetric by construction.</summary>
@@ -4341,15 +4387,45 @@ public sealed class PlanarPulsePotential
             return _pCut.GetOrAdd((a, b), static (key, self) => self.ComputeP(key.Item1, key.Item2), this);
 
         long key = _g.Classifier.Key(_mesh.Cells[a], _mesh.Cells[b], _st, out _);
+
+        // MIM-8's near/far tier, on the class's own BAND rather than on a second evaluation of τ —
+        // PairClassifier.Band is RuleFor's own arithmetic and band 3 IS τ ≥ FarRatio, so this is the
+        // same test ScalarPotentialMatrix makes per pair and a class is never asked to serve both.
+        // With nothing shallow `useFar` is false, the three locals below are the fields this method
+        // always read, and the memo is the one it always filled.
+        bool near   = _shallow.Count > 0 && PairClassifier.BandOf(key) < 3;
+        bool useFar = _shallow.Count > 0 && !near;
+        var terms = useFar ? _termsQFar : _termsQ;
+
         var core = _g.ClassCores(key).Pulse;
-        Complex v = _termsQ.Inverse * core.Inverse + _termsQ.Log * core.Log;
-        if (_termsQ.ExtractsConstant) v += _termsQ.Constant;          // area-normalised ⇒ core = 1
-        if (_termsQ.ExtractsLinear)   v += _termsQ.Linear * core.Radius;
-        v += _remQ1.GetOrAdd(key, static (k, self) =>
-        {
-            var (oa, ob) = self._g.Classifier.Representative(k);
-            return PlanarFill.CellPairPulseRemainder(oa, ob, PairClassifier.RemainderNodes(k, self._st), self._remQ);
-        }, this);
+        Complex v = terms.Inverse * core.Inverse + terms.Log * core.Log;
+        if (terms.ExtractsConstant) v += terms.Constant;              // area-normalised ⇒ core = 1
+        if (terms.ExtractsLinear)   v += terms.Linear * core.Radius;
+        v += (useFar ? _remQ1Far : _remQ1).GetOrAdd(key, useFar
+            ? static (k, self) =>
+              {
+                  var (oa, ob) = self._g.Classifier.Representative(k);
+                  return PlanarFill.CellPairPulseRemainder(oa, ob, PairClassifier.RemainderNodes(k, self._st), self._remQFar);
+              }
+            : static (k, self) =>
+              {
+                  var (oa, ob) = self._g.Classifier.Representative(k);
+                  return PlanarFill.CellPairPulseRemainder(oa, ob, PairClassifier.RemainderNodes(k, self._st), self._remQ);
+              }, this);
+
+        // The subtracted images, put back in closed form — memoised per CLASS like everything else
+        // here, which is exact for an isotropic kernel: the integral depends on the pair's shape and
+        // offset and on nothing else.
+        if (near)
+            v += _shallow1.GetOrAdd(key, static (k, self) =>
+            {
+                var (oa, ob) = self._g.Classifier.Representative(k);
+                Complex t = Complex.Zero;
+                foreach (var im in self._shallow)
+                    t += im.Amplitude / (4.0 * Math.PI)
+                       * ShallowImageCore.CellPairMean(oa, ob, im.Depth, self._st);
+                return t;
+            }, this);
         return v;
     }
 
@@ -4364,10 +4440,20 @@ public sealed class PlanarPulsePotential
         var wb = PlanarFill.PulseAt(_mesh, b);
         var (c0, cl, cr) = _g.CutScalarCores(a, b);
 
-        Complex v = _termsQ.Inverse * c0 + _termsQ.Log * cl;
-        if (_termsQ.ExtractsConstant) v += _termsQ.Constant;          // area-normalised ⇒ core = 1
-        if (_termsQ.ExtractsLinear)   v += _termsQ.Linear * cr;
-        v += PlanarFill.PairRemainderOf(_mesh, wa, wb, PlanarBasisDirection.X, _remQ, _st);
+        bool near   = _shallow.Count > 0 &&
+                      PairClassifier.Band(_mesh.Cells[a], _mesh.Cells[b], _st) < 3;
+        bool useFar = _shallow.Count > 0 && !near;
+        var terms = useFar ? _termsQFar : _termsQ;
+
+        Complex v = terms.Inverse * c0 + terms.Log * cl;
+        if (terms.ExtractsConstant) v += terms.Constant;               // area-normalised ⇒ core = 1
+        if (terms.ExtractsLinear)   v += terms.Linear * cr;
+        v += PlanarFill.PairRemainderOf(_mesh, wa, wb, PlanarBasisDirection.X,
+                                        useFar ? _remQFar : _remQ, _st);
+        if (near)
+            foreach (var im in _shallow)
+                v += im.Amplitude / (4.0 * Math.PI)
+                   * ShallowImageCore.CellPairMean(_mesh.Cells[a], _mesh.Cells[b], im.Depth, _st);
         return v;
     }
 }

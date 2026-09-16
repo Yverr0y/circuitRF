@@ -398,6 +398,67 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         int across, double cellOverSeparation, double before, double after)
         => OneCapacitorOneMesh(across, cellOverSeparation, before, after);
 
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // T9 — THE ACCELERATED PATH FILLS THE SAME SCALAR BLOCK
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // MIM-8 subtracts the shallow images from the pairing's terms and puts them back in closed form.
+    // The DENSE fill does both halves in ScalarPotentialMatrix; the ACCELERATED one reads the same
+    // pairing table through PlanarPulsePotential, for its near set AND for the dense via border, and
+    // its grid table samples the kernel directly. A subtraction that reaches one and not the other
+    // is not a quadrature question — it DELETES the image, and on this fixture that is 78% of the
+    // block's largest entry, an error far larger than the one MIM-8 exists to remove.
+    //
+    // Nothing else would catch it: AimAccuracyTests' stacks resolve their own images, so the split
+    // is empty there and the two paths agree trivially. The gate is the on-demand operator against
+    // the dense matrix on a fixture where the split is NOT empty.
+    [Fact]
+    public void T9_TheOnDemandScalarBlockMatchesTheDenseOne_WhereImagesWereSubtracted()
+    {
+        var p     = Plates(0.2e-6, 12.5);
+        var mesh  = SurfaceMesher.Mesh(p, Uniform, PlanarEdgeReference.LocalConductorWidth).Mesh;
+        var st    = PlanarFillSettings.Default;
+        var cores = PlanarFill.BuildCores(mesh, st);
+        var set   = new PlanarKernelSet(new LayeredSpectralGreens(p.EffectiveStack, p.MaxFrequencyHz),
+                                        st.Order).For(cores);
+        var levels = PlanarLevels.From(p);
+
+        var dense = PlanarFill.ScalarPotentialMatrix(cores, set, levels);
+        var pr    = PlanarFill.MultiLevelPairings.Resolve(cores, set, levels, st);
+        var entry = new PlanarEntryCores(cores);
+
+        int layers = pr.TermsQ.GetLength(0);
+        var pulse  = new PlanarPulsePotential?[layers, layers];
+        bool anyShallow = false;
+        for (int la = 0; la < layers; la++)
+        for (int lb = 0; lb < layers; lb++)
+            if (pr.TermsQ[la, lb] is { } t)
+            {
+                anyShallow |= pr.ShallowQ[la, lb].Count > 0;
+                pulse[la, lb] = new PlanarPulsePotential(entry, t, pr.RemQ[la, lb],
+                                                        pr.ShallowQ[la, lb], pr.TermsQFar[la, lb],
+                                                        pr.RemQFar[la, lb]);
+            }
+
+        // The fixture must be IN the regime, or the comparison proves nothing.
+        Assert.True(anyShallow, "no image was shallow here, so this fixture cannot see the defect");
+
+        double worst = 0, scale = 0;
+        int m = mesh.Cells.Count;
+        for (int a = 0; a < m; a++)
+        for (int b = 0; b < m; b++)
+        {
+            var got = pulse[mesh.Cells[a].LayerIndex, mesh.Cells[b].LayerIndex]!.At(a, b);
+            scale = Math.Max(scale, dense[a, b].Magnitude);
+            worst = Math.Max(worst, (got - dense[a, b]).Magnitude);
+        }
+        _out.WriteLine($"{m} cells: worst |on-demand − dense| / largest entry = {worst / scale:E3}");
+
+        // P5's own tolerance for this comparison: the class representative's coordinates, not the
+        // member's, so the last bits move. Measured at 6.3e-16 here.
+        Assert.True(worst / scale < 1e-12, $"{worst / scale:E3}");
+    }
+
     private void OneCapacitorOneMesh(int across, double cellOverSeparation, double before, double after)
     {
         var mesh = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false,

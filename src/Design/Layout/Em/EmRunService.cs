@@ -239,9 +239,17 @@ public static class EmRunService
 
         var findings = new List<EmFinding>();
 
-        // A port-type migration is a change to the DOCUMENT, and this call promises to write
-        // nothing — so unlike RunCore it is not applied. What it would move does not reach any
-        // finding below it.
+        // ── THE SAME PORT-TYPE MIGRATION THE RUN APPLIES, FOR THE SAME REASON ────────────────────
+        //
+        // In memory, writing nothing — which is exactly what RunCore does with it, so "this writes
+        // nothing" is no reason to skip it. Skipping it was the drift R-aut4-2 exists to prevent: on
+        // a legacy .cem the type lives in the SETUP and the labels are silent, so without this
+        // `AnyNonEdgePort` below reads false, the internal-delta-gap refusal the run produces is not
+        // reported, and `check` passes a setup the run refuses.
+        if (EmPortKindMigration.ApplyInMemory(source.View.Shapes, setup.PortKinds) is > 0 and var moved)
+            findings.Add($"{moved} port type(s) in this EM setup were carried onto the layout's own " +
+                         "port labels, which is where a port's type lives. Open the layout to see " +
+                         "them; saving it makes the move permanent.");
 
         double fMax = 0;
         double[] freqs = [];
@@ -536,9 +544,9 @@ public static class EmRunService
         }
 
         // EM-SEV R-emsev-1 — the findings are SPLIT here, by the class the producer attached, into
-        // the two lists this result has carried since the owner's 2026-08-09 report ("a lot of the
-        // Messages after the EM sim have the yellow warning icon; change those to info"). That split
-        // was made with the only tool available then — which list a call site happened to append to —
+        // the two lists this result has carried since the 2026-08-09 report that most of the EM run's
+        // Messages rows were wearing the warning icon and should be information. That split was made
+        // with the only tool available then — which list a call site happened to append to —
         // and every extraction sentence landed in `notes` regardless of what it said. A run that
         // deleted half the user's circuit reported it three times, correctly, at the weight of the
         // core count.

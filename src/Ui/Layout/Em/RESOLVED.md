@@ -1013,3 +1013,23 @@ An SnP consumed outside its own frequency range says nothing. The user's testben
 against a 0.5–5 GHz `.s2p` with `ExtrapMode=NearestEdge`, so the top half of every curve is the 5 GHz
 value held flat, and no note is emitted anywhere. Real, separate, and an elaboration concern rather
 than an EM one.
+
+### EM-SEV follow-up — three things review found (2026-09-15)
+
+**`Preflight` skipped the port-type migration, so `check` could pass a setup the run refuses.** The
+comment said a migration is a change to the document and this call promises to write nothing — but
+`RunCore` writes nothing either; it applies it **in memory**, which is exactly the point
+(`EmPortKindMigration`). On a `.cem` written before the type moved onto the label, the type lives in
+the setup and the labels are silent, so without the migration `EmPortExtraction.AnyNonEdgePort` reads
+false, the internal-delta-gap refusal the run produces is never reported, and `check` reports a clean
+setup that `em` then refuses. That is precisely the drift R-aut4-2 exists to prevent, so `Preflight`
+now applies it — same call, same in-memory scope, same note.
+
+**`ExcludedArtworkNote` was not in `Refresh`'s reset block**, so a refresh that returns early (no
+layout reference, the layout not found, no technology resolved) left the PREVIOUS layout's sentence
+sitting under the tick boxes. Every other live field in that panel is nulled at the top of `Refresh`
+for the same reason; this one is now too.
+
+**An owner message was re-quoted verbatim in a new code comment.** The repo's rule is paraphrase, not
+quote — the pre-existing quote a few lines up in the same file is grandfathered, a new copy of it is
+not. Rewritten as a paraphrase.

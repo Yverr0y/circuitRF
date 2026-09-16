@@ -11054,3 +11054,53 @@ form, being one evaluation, does not move.
 - **`R-emsev-4`'s refusal was not built**, per `brief-em-run-severity-and-check.md`'s own
   instruction: it is conditional on MIM-8 being declined. The note past the bound now says
   *unmeasured* rather than *wrong*, which is what the measurement supports.
+
+## MIM-8 follow-up — the ACCELERATED path was filling a kernel with the images missing (2026-09-15)
+
+**Found in review, one commit after MIM-8 landed. It is worse than the defect MIM-8 fixed, and on the
+same fixtures.**
+
+`MultiLevelPairings.Resolve` stores two views of every scalar pairing: `TermsQ`, with the shallow
+images subtracted, and `TermsQFar`, with nothing subtracted. They are complete decompositions of one
+kernel **only when the subtracted images are put back in closed form**, which `ScalarPotentialMatrix`
+does and which the accelerated operator did not. `PlanarAimBordered` read `TermsQ`/`RemQ` in three
+places — the FFT grid kernel table, the near set's exact entries, and the dense via border — and
+added nothing back, so every one of them was evaluating a kernel with its dominant term deleted.
+
+**Measured on MIM-3's own plate ladder (0.2 µm, cell/separation 12.5).** The cross-level pairing's
+image is amplitude 0.144 at 0.128 µm. At ρ = 0.5 µm the untreated kernel is 22,116 and the
+shallow-subtracted one is **−74.8**; at ρ = 10 µm, 1,070 against −74.7. Against the dense
+`ScalarPotentialMatrix` the on-demand operator's worst entry was **0.78 of the block's largest** —
+compared with the 0.11 cross-level error MIM-8 exists to remove.
+
+**Why no gate saw it.** `AimAccuracyTests`' stacks resolve their own fitted images, so
+`split.Removed` is empty there, `TermsQ` and `TermsQFar` are the *same object*, and the two paths
+agree trivially. Every fixture that is in the regime — the MIM plates, the coarsely meshed airbridge
+— is tested only through the DENSE fill. **A branch whose off-state is the identity is a branch no
+existing test exercises**, which is the general shape of this and worth remembering: MIM-8's own
+bit-identity discipline is what made the accelerated path look untouched.
+
+**The fix puts the tier where the dense fill has it.**
+
+- The **grid table is sampled from `TermsQFar`**, the whole kernel. It has nowhere to put a closed
+  form, and it does not need one: its table is evaluated at ρ = h·√(dp² + dq²), where a peak of width
+  |b| ≪ h is smooth anyway. The near correction is `nearExact − AimEntry` over the same table, so it
+  cancels exactly and the treated near entries below stay consistent with it.
+- **`PlanarPulsePotential` carries the split**, so the near field and the border take the dense
+  fill's own near/far choice: the treated view plus the closed-form images for a pair whose ρ range
+  reaches the peak, the untreated view for one whose does not. The tier is read off
+  `PairClassifier.BandOf(key) < 3`, which is `RuleFor`'s own arithmetic and is `τ < FarRatio` exactly
+  — the same test `ScalarPotentialMatrix` makes per pair — rather than a second evaluation of τ that
+  could disagree with the class the cores were taken on.
+- The closed form is **memoised per translation class**, like everything else in that type. Exact
+  here: `1/√(ρ² + b²)` is isotropic, so the integral depends on the pair's shape and offset and on
+  nothing else, and a 90° class rotation maps onto itself.
+- **Passing a non-empty `shallow` without the untreated view now throws.** The alternative is what
+  this entry is about: silently dropping the images from every far pair.
+
+**Gate:** `MimThinLayerTests.T9` — the on-demand operator against the dense matrix on a fixture where
+`ShallowQ` is NOT empty (asserted, or the comparison proves nothing). 6.3e-16 after, 0.78 before.
+
+**Left alone:** `PlanarStaticAim` passes no split — its terms come from `StaticScalarAt`, a different
+decomposition MIM-8 did not touch — so its grid table is still the whole kernel it always was.
+`PlanarPulsePotential.TermsFar` is named and documented for the case where that stops being true.

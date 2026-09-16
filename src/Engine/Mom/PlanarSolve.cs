@@ -4716,10 +4716,10 @@ public static class PlanarSolve
     /// still produced, it is still reciprocal and passive, and what is unreliable is a MAGNITUDE. A
     /// refusal would also take away the many multi-level runs where the ratio is fine.
     ///
-    /// <para><b>MIM-8 moved the bound from 5 to 50 and changed what the note MEANS past it.</b>
+    /// <para><b>MIM-8 moved the bound from 5 to 200 and changed what the note MEANS past it.</b>
     /// Before, past the bound was a measured wrongness — 1.46× at 12.5 and the wrong sign at 25.
     /// Now the peak is subtracted and integrated in closed form, the whole measured ladder is inside
-    /// 10%, and past 50 is simply unmeasured. The wording follows that: it reports where the ladder
+    /// 10%, and past 200 is simply unmeasured. The wording follows that: it reports where the ladder
     /// stops rather than predicting what happens beyond it. See
     /// <see cref="PlanarLevels.ValidatedCellOverSeparation"/> for both ladders.</para>
     ///

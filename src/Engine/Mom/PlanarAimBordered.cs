@@ -274,7 +274,14 @@ public sealed class PlanarBorderedAimOperator : IPlanarOperator
             for (int b = a; b < _sheets; b++)
             {
                 int la = _sheetLayer[a], lb = _sheetLayer[b];
-                var tq = pr.TermsQ[la, lb];
+                // MIM-8 — the GRID samples the WHOLE kernel, never the shallow-subtracted view.
+                // The two views are complete decompositions of one kernel only when the subtracted
+                // images are put back, and the grid has nowhere to put them: its table is sampled at
+                // ρ = h·√(dp²+dq²), where a peak of width |b| ≪ h is smooth anyway, so the untreated
+                // decomposition is both correct and already accurate here. The near set's own
+                // correction (nearExact − AimEntry) cancels this table exactly, so the treated near
+                // entries below are consistent with it.
+                var tq = pr.TermsQFar[la, lb];
                 var ta = pr.TermsA[la, lb];
                 if (tq is null) continue;                      // no cell pairing across these levels
 
@@ -321,8 +328,14 @@ public sealed class PlanarBorderedAimOperator : IPlanarOperator
         for (int la = 0; la < layers; la++)
             for (int lb = la; lb < layers; lb++)
                 if (pr.TermsQ[la, lb] is { } t)
+                    // MIM-8 — the near field and the border get the dense fill's own tier: the
+                    // treated view plus the closed-form images for a pair whose ρ range reaches the
+                    // peak, the untreated view for one whose does not. With nothing shallow these
+                    // are the same object and the entry is bit-identical to what it was.
                     pulse[la, lb] = pulse[lb, la] =
-                        new PlanarPulsePotential(g.EntryCores, t, pr.RemQ[la, lb]);
+                        new PlanarPulsePotential(g.EntryCores, t, pr.RemQ[la, lb],
+                                                 pr.ShallowQ[la, lb], pr.TermsQFar[la, lb],
+                                                 pr.RemQFar[la, lb]);
 
         var hFill = new PlanarEntryFill?[layers, layers];
         for (int la = 0; la < layers; la++)
