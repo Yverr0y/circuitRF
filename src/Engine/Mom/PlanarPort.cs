@@ -2045,15 +2045,25 @@ public static class PlanarPorts
 
         var conn = conductors ?? PlanarConductors.Of(mesh);
 
-        // ── WHOSE METAL IS IT? (PCAL2) ───────────────────────────────────────────────────────
+        // ── WHOSE METAL IS IT? (PCAL2, corrected by R-pcal7-1) ───────────────────────────────
         //
-        // Three answers, and the middle one is the one that was missing. The port's OWN conductor
-        // is not a neighbour at all — a flare or pad on the port's own net is R-fed-1's job, it
-        // grows a collinear lead and peels it exactly, and PCAL1 measured that case passive with
-        // this check silent. A separate conductor CARRYING A PORT needs 4-5.5 h. A separate
-        // conductor carrying none needs ≈ 2 h. Turning the first into a refusal would refuse every
-        // taper in the repository.
-        var mine   = new HashSet<int>(conn.LabelsOf(mesh, port));
+        // TWO answers, not three. A conductor CARRYING A PORT needs 4-5.5 h of clearance; a
+        // conductor carrying none needs ≈ 2 h (PCAL1 measured both). The port's own net is the
+        // FIRST of those, and it used to be a third answer — "not a neighbour at all" — on the
+        // reasoning that a flare or pad on the port's own net is R-fed-1's job, which grows a
+        // collinear lead and peels it exactly.
+        //
+        // THAT REASONING IS SOUND ABOUT METAL IN LINE WITH THE FEED and says nothing about a
+        // PARALLEL RETURN RUN of the same net, which is what a spiral inductor is made of. On
+        // the shipped MMIC coil the metal 8 µm from port 1's feed is the next turn — the port's own
+        // net — and the skip reported both feeds CLEAR while the published `.s2p` was an open
+        // circuit with a negative resistance at every AC point (R-pcal7-1; §PCAL7-OWNNET in
+        // RESOLVED.md has the table).
+        //
+        // So own-net metal is measured like any other, and it lands in the DRIVEN class by
+        // construction: the port's own conductor carries this very port, so its label is already in
+        // the `allPorts` set already. Nothing here has to say "driven" for it — the deleted
+        // skip IS the whole change, and the 5 h threshold it now takes is the one that was measured.
         var driven = conn.LabelsCarryingAPort(mesh, allPorts);
 
         bool alongX = port.Direction == PlanarBasisDirection.X;
@@ -2076,6 +2086,22 @@ public static class PlanarPorts
         double nearestDriven  = double.PositiveInfinity;
         double nearestPassive = double.PositiveInfinity;
 
+        // ── R-pcal7-1 — THE FEED'S OWN CROSS-SECTION, COLUMN BY COLUMN ──────────────────────────
+        //
+        // The skip that used to stand here excused the port's whole NET. That is too much: a coil's
+        // next turn is the port's own net and is a neighbour in every sense the calibration standard
+        // cares about. It is also, in the case it was written for, exactly right — a taper's flare
+        // and a pad are the port's own metal IN LINE WITH the feed, R-fed-1 grows a collinear lead
+        // for them and peels it exactly, and calling them neighbours would refuse every taper in the
+        // repository.
+        //
+        // What separates the two is not the NET, it is whether the metal is CONTINUOUS with the
+        // feed's own run across the section. So the exemption is the run itself: at each column,
+        // the maximal unbroken band of metal containing the port's own profile, on the port's own
+        // level. A flare is inside it; a conductor with a gap between it and the feed is not,
+        // whoever owns it. See FeedBands.
+        var bands = FeedBands(mesh, port, conn, alongX, fromLow, tLo, tHi, endRunM);
+
         for (int ci = 0; ci < mesh.Cells.Count; ci++)
         {
             var c = mesh.Cells[ci];
@@ -2097,13 +2123,33 @@ public static class PlanarPorts
             double t1 = alongX ? (region?.YMax ?? c.YMax) : (region?.XMax ?? c.XMax);
             if (t1 > tLo + 1e-15 && t0 < tHi - 1e-15) continue;   // inside the feed's own profile
 
+            // …and inside the feed's own CROSS-SECTION, which on a taper or a pad is wider than the
+            // profile and is still not a neighbour. Only on the port's own level: a band is a run of
+            // metal, and metal on another level is not continuous with this one whatever it looks
+            // like from above.
+            if (c.LayerIndex == port.LayerIndex && bands is not null &&
+                bands.TryGetValue(alongX ? c.IX : c.IY, out var band))
+            {
+                // ── BY GRID INDEX, NOT BY COORDINATE, AND THAT IS NOT A TIDY-UP ──────────────────
+                //
+                // A cut cell's `Region` is the METAL it holds, and a MERGED SLIVER's region covers
+                // more than its own grid rectangle — the sliver's metal was folded into its
+                // neighbour's cell (R-cut-1). Comparing that region against the band's gridlines
+                // therefore fails for a cell that IS in the band: on the owner's Klopfenstein taper
+                // the two cells at the flare's rim reported metal out to 643.1 µm from a grid cell
+                // ending at 611.8, and the port's own flare came back as a neighbour 203.9 µm away.
+                // The index says which column of the cross-section this is, and a merge does not
+                // move it.
+                int iTran = alongX ? c.IY : c.IX;
+                if (iTran >= band.Lo && iTran <= band.Hi) continue;
+            }
+
             // A cell no rooftop pairs with carries no current and is not in the solve at all, so it
             // cannot be a neighbour — see PlanarConductors.CarriesCurrent, and the conformal taper
             // that measured the difference.
             if (!conn.CarriesCurrent(ci)) continue;
 
             int label = conn.LabelOf(ci);
-            if (mine.Contains(label)) continue;                   // the port's own net, not a neighbour
 
             // ── IS THIS CELL IN THE FEED REGION AT ALL? (fixed 2026-08-12) ──────────────────────
             //
@@ -2152,6 +2198,84 @@ public static class PlanarPorts
                   nearestPassive, passiveRequiredM, slabHeightM, endRunM);
     }
 
+
+    /// <summary>
+    /// <b>R-pcal7-1 — the feed's own unbroken cross-section at every column of the end run</b>, keyed
+    /// by that column's grid index, or null when the port's own level cannot be walked.
+    ///
+    /// <para>At each column the band is the maximal unbroken run of metal containing the port's own
+    /// transverse profile. A taper's flare, a pad and a bend's corner are that run
+    /// getting wider; a second conductor — the next turn of a coil, a neighbouring trace — is
+    /// separated from it by a gap and is not in it, whether or not it is the same NET.</para>
+    ///
+    /// <para><b>Where the profile band is not metal, the feed has ENDED, and the band is empty from
+    /// there inward.</b> That is not a technicality: the shipped MMIC spiral's second port sits on a
+    /// 30 µm pad that stops, and the coil body starts 10 µm later, reached through a via on another
+    /// level. A band that resumed there would call 250 µm of coil "the feed getting wider" and the
+    /// port would measure clear while its calibration standard described nothing that exists.</para>
+    /// </summary>
+    private static Dictionary<int, (int Lo, int Hi)>? FeedBands(
+        PlanarMesh mesh, PlanarPortResolution port, PlanarConductors conn,
+        bool alongX, bool fromLow, double tLo, double tHi, double endRunM)
+    {
+        var gLong = alongX ? mesh.GridX : mesh.GridY;
+        var gTran = alongX ? mesh.GridY : mesh.GridX;
+        int nLong = gLong.Count - 1, nTran = gTran.Count - 1;
+        if (nLong < 1 || nTran < 1) return null;
+
+        int nx = mesh.GridX.Count - 1;
+        var at = new int[nx * (mesh.GridY.Count - 1)];
+        Array.Fill(at, -1);
+        for (int i = 0; i < mesh.Cells.Count; i++)
+        {
+            var cell = mesh.Cells[i];
+            if (cell.LayerIndex == port.LayerIndex) at[cell.IY * nx + cell.IX] = i;
+        }
+
+        int CellAt(int iLong, int iTran)
+        {
+            if ((uint)iLong >= (uint)nLong || (uint)iTran >= (uint)nTran) return -1;
+            return alongX ? at[iTran * nx + iLong] : at[iLong * nx + iTran];
+        }
+        // ── METAL, NOT CURRENT, AND THE DIFFERENCE IS MEASURABLE ────────────────────────────────
+        //
+        // Elsewhere in this file a cell no rooftop pairs with is not a neighbour, because it is not
+        // in the solve at all. Here the question is the opposite one — is this cell's metal part of
+        // the feed's own unbroken cross-section — and a cell that exists is, whatever bases it ended
+        // up carrying. Asking `CarriesCurrent` instead punched a hole in the band at an obliquely
+        // CUT rim, where a conformal cell can have its rooftops declined for not being flow-simple,
+        // and everything beyond the hole read as a neighbour: the owner's own Klopfenstein taper
+        // came back refused with "other metal 203.9 µm away", which is its own flare.
+        bool Metal(int iLong, int iTran) => CellAt(iLong, iTran) >= 0;
+
+        // The profile's own transverse cells: every cell whose span lies inside [tLo, tHi].
+        int pLo = -1, pHi = -1;
+        for (int t = 0; t < nTran; t++)
+            if (gTran[t] >= tLo - 1e-15 && gTran[t + 1] <= tHi + 1e-15) { if (pLo < 0) pLo = t; pHi = t; }
+        if (pLo < 0) return null;
+
+        int outer = IndexOf(gLong, port.OuterEdgeM);
+        if (outer < 0) return null;
+
+        var bands = new Dictionary<int, (int Lo, int Hi)>();
+        for (int k = 0; ; k++)
+        {
+            int col = fromLow ? outer + k : outer - k;
+            if (col < 0 || col >= nLong) break;
+            double mid = 0.5 * (gLong[col] + gLong[col + 1]);
+            if (Math.Abs(mid - port.OuterEdgeM) > endRunM) break;
+
+            bool whole = true;
+            for (int t = pLo; t <= pHi; t++) if (!Metal(col, t)) { whole = false; break; }
+            if (!whole) break;                      // the feed has ended: no band here or further in
+
+            int lo = pLo, hi = pHi;
+            while (lo - 1 >= 0    && Metal(col, lo - 1)) lo--;
+            while (hi + 1 < nTran && Metal(col, hi + 1)) hi++;
+            bands[col] = (lo, hi);
+        }
+        return bands.Count == 0 ? null : bands;
+    }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // PCAL3 — PUTTING THE NEIGHBOUR IN THE PROFILE
@@ -2529,7 +2653,17 @@ public static class PlanarPorts
 
         // ── Walk outward on each side, taking in every conductor that carries a port of its own at
         //    THIS plane and is still inside the driven threshold ────────────────────────────────
-        var mine   = new HashSet<int>(conductors.LabelsOf(mesh, port));
+        //
+        // R-pcal7-3 — THE PORT'S OWN NET IS NOT DECLINED HERE ANY MORE. It used to be, by name:
+        // "a standard reproducing it would be two conductors the structure shorts together
+        // somewhere this profile cannot see". <b>The objection is not borne out.</b> The error box
+        // is a local property of the cross-section and the excitation at the plane, and where the
+        // DUT joins its two conductors beyond the plane does not enter it — measured on the
+        // `Coupled` fixture, two 800 µm arms 50 µm apart shorted at the far end, which read 135 nH
+        // and non-passive with the decline standing and 1.2 nH and passive with it lifted, against
+        // a two-wire estimate of 1.0-1.3 nH (§PCAL7-OWNNET). Two terminals of one inductor brought
+        // out side by side is one of the two common ways to draw a coil, and it is exactly what
+        // this branch used to refuse.
         var driven = conductors.LabelsCarryingAPort(mesh, allPorts);
 
         int spanLo = probe.OwnLo, spanHi = probe.OwnHi;
@@ -2560,16 +2694,6 @@ public static class PlanarPorts
                 while (nHiT + 1 < nTran && probe.Metal(outer, nHiT + 1)) nHiT++;
 
                 int label = conductors.LabelOf(probe.CellAt(outer, t));
-
-                if (mine.Contains(label))
-                {
-                    declined =
-                        $"{Who()} has metal {SurfaceMesher.Eng(gap)}m away that is part of the port's " +
-                        "OWN net, reaching the reference plane as a separate run. A standard " +
-                        "reproducing it would be two conductors the structure shorts together " +
-                        "somewhere this profile cannot see.";
-                    break;
-                }
 
                 if (!driven.Contains(label))
                 {

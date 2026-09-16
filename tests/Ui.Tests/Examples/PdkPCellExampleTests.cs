@@ -628,7 +628,12 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         Assert.Null(snapshot.TechIdentity);
         Assert.NotEmpty(snapshot.Parameters);
         Assert.Single(view.Instances);
-        Assert.Empty(view.Shapes);
+
+        // Nothing but the two EM port labels: the artwork itself is the INSTANCE's, which is the
+        // whole point of the cache being rebuildable. (R-pcal7 M0 put the labels here — a port label
+        // inside a placed instance is artwork rather than a port, see TheSpiralsPortLabelsSitOnItsPins.)
+        Assert.All(view.Shapes, sh => Assert.True(sh is LabelShape { IsPort: true }));
+        Assert.Equal(2, view.Shapes.Count);
 
         PCellRegistry.ClearResolvers();
         using var resolver = new PCellWorkerResolver(
@@ -1438,5 +1443,77 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         Assert.Equal(2, PdkKitRegistry.Find(PdkKitRegistry.RefFor("k", Mlin),   root)!.Symbol.Pins.Count);
 
         PdkKitRegistry.ResetAllForTests();
+    }
+
+    // ══ 5. The spiral demonstrates EM on a PCell ════════════════════════════
+
+    /// <summary>
+    /// <b>R-pcal7 M0 — the shipped spiral carries port labels and an EM setup, and the setup
+    /// includes BOTH metal levels.</b>
+    ///
+    /// <para>The example carried the coil and nothing that simulated it, so the one PCell workspace
+    /// circuitRF ships did not demonstrate the thing a PCell coil is for. Both halves of what was
+    /// added are gated, and the second is not a formality: the coil's inner terminal escapes on
+    /// Metal2 through two via posts, so a run whose analysis levels are Metal1 alone drops the
+    /// underpass and the two ports are not connected at all. It publishes |S21| = 4e-4 — a clean,
+    /// smooth, perfectly passive OPEN CIRCUIT — with one note among thirty saying two via shapes
+    /// were ignored. Measured, on this very file, before the level list was added.</para>
+    ///
+    /// <para>The port labels are on the TOP cell rather than inside the generated one because
+    /// <c>EmPortExtraction</c> reads the view's own shapes and not the flattened ones. A label
+    /// inside a placed instance is artwork, not a port, and the run refuses with "this layout has
+    /// no port labels".</para>
+    /// </summary>
+    [Fact]
+    public void TheSpiralCarriesAnEmSetup_OverBothMetalLevels()
+    {
+        string cem = Path.Combine(ExampleRoot(), "SpiralInductor", "em", "SpiralInductor.cem");
+        Assert.True(File.Exists(cem), $"'{cem}' is missing: the example demonstrates no EM run.");
+
+        var setup = EmSetupPersistence.LoadFromFile(cem);
+        Assert.Equal("SpiralInductor/layout/SpiralInductor.clay", setup.LayoutRef);
+        Assert.Equal("Metal1", setup.SignalStackupLayerName);
+        Assert.Equal(["Metal1", "Metal2"], setup.AnalysisLevelNames);
+
+        // The via posts the level list exists for.
+        string clay = Path.Combine(ExampleRoot(), "SpiralInductor", "layout", "SpiralInductor.clay");
+        var instance = Assert.Single(LayoutPersistence.LoadFromFile(clay).Instances);
+        string cellDir = RefPath.Resolve(Path.GetDirectoryName(clay)!, instance.CellRef);
+        var cell = LayoutPersistence.LoadFromFile(
+            Path.Combine(cellDir, "layout", Path.GetFileName(cellDir) + ".clay"));
+        Assert.Contains(cell.Shapes, sh => sh.Layer == Via);
+        Assert.Contains(cell.Shapes, sh => sh.Layer == Metal2);
+    }
+
+    /// <summary>
+    /// <b>The two port labels are on the TOP layout, at the generated cell's own pins.</b> A port
+    /// half a line width off the metal takes its width from the instance's bounding box rather than
+    /// from the pin — the defect the test above this one exists for — so the anchors are asserted
+    /// against the pins rather than against the numbers that happen to be in the file.
+    /// </summary>
+    [Fact]
+    public void TheSpiralsPortLabelsSitOnItsPins()
+    {
+        string clay = Path.Combine(ExampleRoot(), "SpiralInductor", "layout", "SpiralInductor.clay");
+        var view = LayoutPersistence.LoadFromFile(clay);
+
+        var labels = view.Shapes.OfType<LabelShape>().Where(l => l.IsPort).ToList();
+        Assert.Equal(2, labels.Count);
+        Assert.Equal(["1", "2"], labels.Select(l => l.Text).Order());
+        Assert.All(labels, l => Assert.Equal(Metal1, l.Layer));
+
+        var instance = Assert.Single(view.Instances);
+        Assert.Equal(0, instance.X);
+        Assert.Equal(0, instance.Y);
+        string cellDir = RefPath.Resolve(Path.GetDirectoryName(clay)!, instance.CellRef);
+        var cell = LayoutPersistence.LoadFromFile(
+            Path.Combine(cellDir, "layout", Path.GetFileName(cellDir) + ".clay"));
+
+        foreach (var pin in cell.Pins)
+        {
+            var label = Assert.Single(labels, l => l.Text == pin.Name);
+            Assert.Equal(pin.X, label.X);
+            Assert.Equal(pin.Y, label.Y);
+        }
     }
 }

@@ -113,17 +113,74 @@ public sealed record PlanarErrorBox(
     public double PeelAmplification => A11.Magnitude / Math.Max((A21 * A21).Magnitude, double.Epsilon);
 
     /// <summary>
-    /// <b>PEEL — what this port's de-embedding is expected to be wrong by, in |ΔS|:
-    /// <see cref="ConsistencyResidual"/> × <see cref="PeelAmplification"/>.</b> This is the number to
-    /// read; see <see cref="ConsistencyResidual"/> for why that one is not.
+    /// <b>LFP — the DUT's OWN share of the raw-S error, in absolute |ΔS| on a raw s-parameter, and
+    /// the second of the two terms <see cref="DeembedErrorFloor"/> amplifies.</b> 2e-8.
     ///
-    /// <para><b>It is a FLOOR on the instrument's own error and not a bound on the answer.</b> It is
-    /// what the peel does to a structure it was calibrated for — measured on a uniform line, where
-    /// the right answer is exactly 0 — so it says nothing about the DUT's own meshing or about
-    /// radiation. A run whose floor is 0.9 is publishing noise; a run whose floor is 1e-4 may still
-    /// be wrong for reasons this cannot see.</para>
+    /// <para><b>Why there has to be a second term at all.</b> PEEL derived the floor on a uniform
+    /// line, where the DUT's own discretisation error is the same shape as the standards' and
+    /// cancels, so <see cref="ConsistencyResidual"/> was the whole of it. On any other structure it
+    /// does not cancel, and it is amplified by the same <see cref="PeelAmplification"/> — so a run
+    /// carrying only the standards' share under-predicts. Measured on the shipped
+    /// <c>examples/PDK PCells</c> spiral: the published floor read 1.106e-2 at 320 MHz against a
+    /// realised error of about 0.5, i.e. <b>40× low, on a row that is 9× wrong</b>.</para>
+    ///
+    /// <para><b>Where 2e-8 comes from, and what it is NOT.</b> It is not the engine's numerical
+    /// noise: R-lfp-1 measured that directly by re-solving the same coil with one knob moved at a
+    /// time (the DCIM fit's sample count, tolerance, order and path extent; the fill's self, touch,
+    /// near, mid and far quadrature; the radial table; the accumulation order; LDLᵀ against LU) and
+    /// the raw S moves by <b>5.1e-10 at 320 MHz and 3.3e-9 at 2.08 GHz</b>, dominated by the fill's
+    /// SINGULAR quadrature (<c>SelfPanels</c> 4→6 alone is 5.08e-10) rather than by the fit. That is
+    /// BELOW <see cref="ConsistencyResidual"/> on every fixture measured, so a floor built on it
+    /// would change nothing. <b>2e-8 is the DISCRETISATION share</b> — the meshed structure's own
+    /// departure from the drawn one, which no knob reaches (§4 of the brief measures REFINING as a
+    /// net loss here, because the port's gap is one cell wide). It is read off the four rows of that
+    /// spiral whose σ_max(S) &gt; 1 proves they are not a network, as |ΔS| ÷
+    /// <see cref="PeelAmplification"/>: <b>2.0e-8, 4.8e-8, 7.6e-8, 1.0e-7</b> at 160 / 320 / 480 /
+    /// 640 MHz. <b>The SMALLEST is taken</b>, because this is a floor and a floor must not
+    /// over-claim.</para>
+    ///
+    /// <para><b>It is a floor and not a bound, and the direction it can be wrong in is stated.</b>
+    /// On a uniform line the DUT's share is zero by cancellation, so on a line this term
+    /// over-predicts — and in practice it does not bind there at all: on every fixture in
+    /// <c>PeelConditioningTests</c> the standards' residual is 1.8e-8 to 5.6e-4, so
+    /// <see cref="ConsistencyResidual"/> is the larger of the two and those floors are unchanged to
+    /// the last bit. It binds on a part whose calibration is GOOD and whose port is BADLY
+    /// CONDITIONED, which is exactly the case that reached a user.</para>
     /// </summary>
-    public double DeembedErrorFloor => ConsistencyResidual * PeelAmplification;
+    public const double DutRawErrorFloor = 2e-8;
+
+    /// <summary>
+    /// <b>PEEL/LFP — what this port's de-embedding is expected to be wrong by, in |ΔS|:
+    /// <c>max(<see cref="ConsistencyResidual"/>, <see cref="DutRawErrorFloor"/>) ×
+    /// <see cref="PeelAmplification"/></c>.</b> This is the number to read; see
+    /// <see cref="ConsistencyResidual"/> for why that one is not.
+    ///
+    /// <para><b>Two terms, one amplifier.</b> The peel divides by <c>a₂₁²</c>, so an ABSOLUTE error
+    /// anywhere in the raw s-parameters it consumes reaches the answer multiplied by
+    /// <see cref="PeelAmplification"/> — whether that error is the two standards disagreeing with
+    /// each other (<see cref="ConsistencyResidual"/>) or the DUT's own raw solve being what it is
+    /// (<see cref="DutRawErrorFloor"/>). PEEL published only the first and measured only the first,
+    /// on a fixture where the second cancels.</para>
+    ///
+    /// <para><b>It is a FLOOR on the instrument's own error and not a bound on the answer.</b> It
+    /// says nothing about radiation, and nothing about a DUT meshed so coarsely that its own
+    /// physics is wrong. A run whose floor is 0.9 is publishing noise; a run whose floor is 1e-4 may
+    /// still be wrong for reasons this cannot see.</para>
+    ///
+    /// <para><b>The two terms obey DIFFERENT frequency laws and the run's remedy sentence knows
+    /// it</b> — the residual rises as ω while <c>|a₂₁|²</c> rises as ω², so the standards' share
+    /// falls as 1/f and the DUT's as 1/f². <see cref="PlanarSolve"/>'s band-edge extrapolation
+    /// branches on which term binds.</para>
+    /// </summary>
+    public double DeembedErrorFloor =>
+        Math.Max(ConsistencyResidual, DutRawErrorFloor) * PeelAmplification;
+
+    /// <summary>
+    /// <b>LFP — true when <see cref="DutRawErrorFloor"/> is the term that set
+    /// <see cref="DeembedErrorFloor"/>,</b> which is what decides whether that floor falls as 1/f or
+    /// as 1/f² and therefore what band edge the run's remedy sentence can offer.
+    /// </summary>
+    public bool FloorIsDutBound => ConsistencyResidual < DutRawErrorFloor;
 }
 
 /// <summary>The whole per-port calibration at one frequency: γ, the error box, and Z_c.</summary>

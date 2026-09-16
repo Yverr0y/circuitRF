@@ -16,7 +16,36 @@
       }
     }
   },
-  "Shapes": [],
+  "Shapes": [
+    {
+      "$type": "Label",
+      "X": -110000,
+      "Y": -125000,
+      "Text": "1",
+      "Height": 5000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "Style": "Regular",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    },
+    {
+      "$type": "Label",
+      "X": -155000,
+      "Y": -46000,
+      "Text": "2",
+      "Height": 5000,
+      "Rotation": "R0",
+      "IsPort": true,
+      "Style": "Regular",
+      "Layer": {
+        "Layer": 1,
+        "Datatype": 0
+      }
+    }
+  ],
   "Instances": [
     {
       "CellRef": "../../.generated-cells/KIT_SPIRAL_f5c89c06b982",

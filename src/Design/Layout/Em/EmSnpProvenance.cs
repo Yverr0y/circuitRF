@@ -115,23 +115,76 @@ public static class EmSnpProvenance
     public static IReadOnlyList<string> ValidityCaveats(PlanarSolveResult? solve)
     {
         if (solve is null) return [];
+        var caveats = new List<string>();
+
         var breached = new List<PlanarFeedClearance>();
         foreach (var c in solve.FeedClearances) if (c.Breached) breached.Add(c);
-        if (breached.Count == 0) return [];
+        if (breached.Count > 0)
+        {
+            var parts = new List<string>();
+            foreach (var b in breached)
+                parts.Add($"port {b.PortNumber} at {b.Heights.ToString("0.##", CultureInfo.InvariantCulture)} h " +
+                          $"(needs {b.RequiredHeights.ToString("0.#", CultureInfo.InvariantCulture)})");
 
-        var parts = new List<string>();
-        foreach (var b in breached)
-            parts.Add($"port {b.PortNumber} at {b.Heights.ToString("0.##", CultureInfo.InvariantCulture)} h " +
-                      $"(needs {b.RequiredHeights.ToString("0.#", CultureInfo.InvariantCulture)})");
+            caveats.Add(
+                "the port de-embedding was applied OUTSIDE the geometry it is valid for: " +
+                string.Join(", ", parts) +
+                ". Another conductor sits inside the run of line the calibration standard reproduces, so " +
+                "the error box was measured on a structure that is not the one being corrected. These " +
+                "s-parameters are not a measurement of this structure. Re-run with the feeds separated, " +
+                "or with port de-embedding off, before comparing them with anything.");
+        }
 
-        return [
-            "the port de-embedding was applied OUTSIDE the geometry it is valid for: " +
-            string.Join(", ", parts) +
-            ". Another conductor sits inside the run of line the calibration standard reproduces, so " +
-            "the error box was measured on a structure that is not the one being corrected. These " +
-            "s-parameters are not a measurement of this structure. Re-run with the feeds separated, " +
-            "or with port de-embedding off, before comparing them with anything.",
-        ];
+        // ── R-pcal7-4 — A ROW THAT IS NOT A NETWORK IS NAMED ON THE FILE'S OWN FACE ─────────────
+        //
+        // PCAL2's finding, one case further on: the run says NOT PASSIVE in its notes and the notes
+        // do not survive onto the `.sNp`. On the shipped MMIC spiral the four points below about
+        // 0.8 GHz read 110 nH against a real 2.8 nH, with σ_max up to 1.09 — and a user opening that
+        // file in the Data Display six months later sees a smooth, plausible curve with nothing on
+        // it to say the bottom decade is not an answer. σ_max > 1 is not an inaccuracy that needs a
+        // threshold argued for: a passive structure cannot do it, so the excess is the ANALYSIS.
+        // The frequencies are quoted because a reader acts on them — by moving the sweep's lower
+        // edge — and a count cannot be acted on.
+        if (solve.NonPassivePoints.Count > 0)
+        {
+            var np = solve.NonPassivePoints;
+            double worst = 0;
+            foreach (var e in np) if (e.SigmaMax > worst) worst = e.SigmaMax;
+
+            string which = np.Count == 1
+                ? Eng(np[0].FrequencyHz) + "Hz"
+                : $"{Eng(np[0].FrequencyHz)}Hz to {Eng(np[^1].FrequencyHz)}Hz";
+
+            // ASCII ONLY, and that is not a style choice. Touchstone is written in an encoding this
+            // writer transliterates to, and a sigma or a subscripted a21 comes out of it as "?" —
+            // measured on this very line, which first read "worst ?_max(S)". A caveat the file
+            // cannot spell is a caveat nobody can act on.
+            caveats.Add(
+                $"{np.Count} of these rows are NOT A PASSIVE NETWORK and should not be used: " +
+                $"{which}, worst sigma_max(S) = " +
+                $"{worst.ToString("0.0###", CultureInfo.InvariantCulture)}. " +
+                "A passive structure cannot exceed 1, so the excess is this analysis rather than the " +
+                "design: the de-embedding's own peel divides by a21 squared, which vanishes with " +
+                "frequency, so the bottom of a band is where it shows. Raise the sweep's lower edge, " +
+                "or read those rows as unanswered.");
+        }
+
+        return caveats;
+    }
+
+    /// <summary>Engineering notation for a frequency, so a caveat reads the way the run's own note
+    /// does. The engine's own <c>SurfaceMesher.Eng</c> is internal to it, and one caveat line is not
+    /// a reason to widen that.</summary>
+    private static string Eng(double v)
+    {
+        (double scale, string suffix) = Math.Abs(v) switch
+        {
+            >= 1e9 => (1e9, "G"),
+            >= 1e6 => (1e6, "M"),
+            >= 1e3 => (1e3, "k"),
+            _      => (1.0, ""),
+        };
+        return (v / scale).ToString("0.###", CultureInfo.InvariantCulture) + " " + suffix;
     }
 
     /// <summary>Every caveat line stamped into an existing <c>.snp</c>, in file order. Empty when

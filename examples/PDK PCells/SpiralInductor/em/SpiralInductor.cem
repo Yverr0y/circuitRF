@@ -1,0 +1,45 @@
+{
+  "FormatVersion": 1,
+  "Name": "SpiralInductor",
+  "LayoutRef": "SpiralInductor/layout/SpiralInductor.clay",
+  "SignalStackupLayerName": "Metal1",
+  "AnalysisLevelNames": [
+    "Metal1",
+    "Metal2"
+  ],
+  "Frequency": {
+    "StartExpr": "0",
+    "StopExpr": "8",
+    "StepExpr": "",
+    "NumPoints": 51,
+    "Mode": "PointCount",
+    "Kind": "Linear",
+    "StartUnit": "GHz",
+    "StopUnit": "GHz",
+    "StepUnit": "Hz"
+  },
+  "Port1Z0Real": 50,
+  "Port1Z0Imag": 0,
+  "Port2Z0Real": 50,
+  "Port2Z0Imag": 0,
+  "Mesh": {
+    "MinCellsAcrossWidth": 8,
+    "EdgeCells": 4,
+    "EdgeFractionOfWidth": 0.1,
+    "EdgeGrowthRatio": 1.5,
+    "TruncationHeights": 6,
+    "TruncationTailCells": 4
+  },
+  "DispersionCorrection": true,
+  "ResonanceSearch": false,
+  "RadiationPattern": false,
+  "AnalysisKind": "Planar",
+  "PlanarMesh": {
+    "Auto": false,
+    "CellsPerWavelength": 20,
+    "EdgeMesh": false,
+    "EdgeCells": 3,
+    "MinCellsAcrossConductor": 2,
+    "CurrentModel": "None"
+  }
+}

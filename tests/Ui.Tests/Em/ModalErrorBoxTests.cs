@@ -102,9 +102,17 @@ public sealed class ModalErrorBoxTests(ITestOutputHelper output) : IDisposable
         // neighbour is IN the standard now, so it is not a neighbour any more.
         Assert.DoesNotContain(r.Notes, n => n.Contains("not isolated", StringComparison.Ordinal));
 
-        // And the file carries no validity caveat, because the calibration is not being applied
+        // And the file declares nothing about VALIDITY, because the calibration is not being applied
         // outside its validity — it is a different calibration.
-        Assert.Empty(EmSnpProvenance.ReadCaveats(r.SnpPath!));
+        var caveats = EmSnpProvenance.ReadCaveats(r.SnpPath!);
+        foreach (string c in caveats) output.WriteLine("caveat: " + c);
+        Assert.DoesNotContain(caveats, c => c.Contains("OUTSIDE", StringComparison.Ordinal));
+
+        // R-pcal7-4 — what it DOES declare is a fact this run has always reported and the file has
+        // never carried: this single point comes back with sigma_max just over 1, so it is not a
+        // network, and the run says so in its notes. A `.sNp` carries no notes.
+        bool notPassive = r.Notes.Any(n => n.Contains("NOT PASSIVE", StringComparison.Ordinal));
+        Assert.Equal(notPassive, caveats.Any(c => c.Contains("NOT A PASSIVE NETWORK", StringComparison.Ordinal)));
     }
 
     /// <summary>Gate 1's other half: the CLI takes the same decision from the same code and exits

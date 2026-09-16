@@ -238,12 +238,18 @@ public sealed class PlanarKernel
     /// and only to CHECK the direction the metal gave. <b>Optional, and it must stay optional</b>:
     /// the EM panel calls this before any port has resolved, and a pre-solve unknown count that
     /// disagreed with the run's would be exactly the defect P12 fixed in the ceiling.</param>
+    /// <param name="leads">M4/R-pcal7-2 — the uniform feed this run GREW, so a ceiling refusal can
+    /// say that part of the mesh is not the user's own artwork. Optional for the same reason
+    /// <paramref name="ports"/> is: the panel asks for a count before anything has been grown, and
+    /// the leads change no gridline the mesher would otherwise have laid down.</param>
     public PlanarMeshReport Mesh(PlanarProblem problem, PlanarMeshSettings settings,
                                 RunControl? control = null, bool accelerated = false,
                                 SurfaceMesher.PlanarLengthFormat? lengthFormat = null,
-                                IReadOnlyList<PlanarPort>? ports = null)
+                                IReadOnlyList<PlanarPort>? ports = null,
+                                IReadOnlyList<PlanarFeedLead>? leads = null)
         => SurfaceMesher.Mesh(problem, settings, PlanarEdgeReference.LocalConductorWidth, control,
-                              accelerated: accelerated, lengthFormat: lengthFormat, ports: ports);
+                              accelerated: accelerated, lengthFormat: lengthFormat, ports: ports,
+                              leads: leads);
 
     /// <summary>
     /// Mesh → resolve ports → sweep → <see cref="DataSet"/>.
@@ -304,7 +310,7 @@ public sealed class PlanarKernel
         var report = Mesh(meshed, meshSettings, control,
                           accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                               st.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
-                          lengthFormat: lengthFormat, ports: ports);
+                          lengthFormat: lengthFormat, ports: ports, leads: leads);
         if (!report.CanSolve) throw new PlanarMeshRefusedException(report);
 
         ct.ThrowIfCancellationRequested();
@@ -367,7 +373,7 @@ public sealed class PlanarKernel
                         retry = Mesh(meshed, candidate, control,
                                      accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                                          st.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
-                                     lengthFormat: lengthFormat, ports: ports);
+                                     lengthFormat: lengthFormat, ports: ports, leads: leads);
                     }
                     catch (PlanarMeshRefusedException) { continue; }
                     if (!retry.CanSolve) continue;
@@ -483,13 +489,13 @@ public sealed class PlanarKernel
         // different structure than the sweep beside it: Solve() meshes the extended problem, so a
         // recomputed map that meshed the drawn one would disagree with the currents the sweep kept,
         // cell for cell, for no visible reason.
-        var meshed = PlanarFeedExtension.Extend(
-            PlanarGroundPath.Extend(problem, ports).Problem, ports, st0.Calibration, lengthFormat).Problem;
+        var (meshed, heatLeads, _) = PlanarFeedExtension.Extend(
+            PlanarGroundPath.Extend(problem, ports).Problem, ports, st0.Calibration, lengthFormat);
 
         var report   = Mesh(meshed, meshSettings,
                             accelerated: SurfaceMesher.UsesAcceleratedCeiling(
                                 st0.Fill?.Aim is not null, meshed.RequiresGeneralKernel),
-                            lengthFormat: lengthFormat, ports: ports);
+                            lengthFormat: lengthFormat, ports: ports, leads: heatLeads);
         if (!report.CanSolve) throw new PlanarMeshRefusedException(report);
 
         var resolved = PlanarPorts.ResolveAll(report.Mesh, ports);

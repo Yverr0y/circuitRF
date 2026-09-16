@@ -72,7 +72,57 @@ public sealed record PlanarFeedLead(
     int    PortNumber,
     double LengthM,
     double DrawnEdgeM,
-    double ExistingUniformM);
+    double ExistingUniformM)
+{
+    /// <summary>
+    /// <b>R-pcal7-2 — how much of this lead the port's NEIGHBOURHOOD asked for</b>, as against its
+    /// cross-section. Zero on every lead grown for the reason this file was written for.
+    ///
+    /// <para>An init-only member rather than a positional parameter, so every existing construction
+    /// site keeps compiling and keeps meaning what it meant. It exists because the two shortfalls
+    /// are two different things to have gone wrong and a user chasing a lead needs to know which:
+    /// "60 µm on top of 239 µm it already had" means the metal changes width at the plane, while a
+    /// lead grown because a coil turn runs 8 µm away is a different sentence and a different
+    /// remedy.</para>
+    /// </summary>
+    public double NeighbourShortfallM { get; init; }
+
+    /// <summary>How much of this lead the port's own CROSS-SECTION asked for — R-fed-1's original
+    /// quantity, kept beside <see cref="NeighbourShortfallM"/> so the note can say which of the two
+    /// actually set <see cref="LengthM"/> instead of guessing from the arithmetic.</summary>
+    public double SectionShortfallM { get; init; }
+
+    /// <summary>How far inward from <see cref="DrawnEdgeM"/> the offending metal
+    /// <see cref="NeighbourShortfallM"/> was measured against first appears, and how far it sits
+    /// ACROSS the feed. Both NaN when the neighbourhood asked for nothing.</summary>
+    public double NeighbourAtM { get; init; } = double.NaN;
+
+    /// <summary>See <see cref="NeighbourAtM"/>.</summary>
+    public double NeighbourAcrossM { get; init; } = double.NaN;
+
+    /// <summary>
+    /// <b>R-pcal7-3 — the longest lead among the ports this one could share a reference plane
+    /// with</b>, when that is what set <see cref="LengthM"/>. Zero otherwise.
+    ///
+    /// <para>A calibration group is peeled at ONE plane and its error box is modal, so a mode has
+    /// one travelled length for the whole group or none — <c>CommonPeelLength</c> refuses a group
+    /// whose members' leads differ. R-pcal7-2 produces leads differing by microns routinely, so
+    /// without this that refusal would fire on almost every grouped part. Growing the shorter
+    /// members to the longest one costs accuracy nothing: a longer lead is still a uniform section
+    /// of the same cross-section and is peeled exactly.</para>
+    /// </summary>
+    public double PeerFloorM { get; init; }
+
+    /// <summary>Whether the neighbourhood term, not the cross-section, is what set
+    /// <see cref="LengthM"/>.</summary>
+    public bool GrownForNeighbour =>
+        NeighbourShortfallM > SectionShortfallM && NeighbourShortfallM >= PeerFloorM;
+
+    /// <summary>Whether a peer's longer lead, not this port's own shortfall, set
+    /// <see cref="LengthM"/>.</summary>
+    public bool GrownForPeer =>
+        PeerFloorM > SectionShortfallM && PeerFloorM > NeighbourShortfallM;
+}
 
 public static class PlanarFeedExtension
 {
@@ -119,10 +169,121 @@ public static class PlanarFeedExtension
         ArgumentNullException.ThrowIfNull(problem);
         ArgumentNullException.ThrowIfNull(ports);
 
-        var fmt      = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
-        var cal      = calibration ?? PlanarCalibrationSettings.Default;
+        var cal       = calibration ?? PlanarCalibrationSettings.Default;
         double wanted = cal.EndRunHeights * problem.Slab.HeightM;
         if (!(wanted > 0)) return (problem, [], []);
+
+        // ── R-pcal7-2 — ONE FIXED-POINT STEP, AND DELIBERATELY NOT A LOOP ────────────────────────
+        //
+        // The neighbourhood shortfall is measured on the artwork as DRAWN, which is the only state
+        // that exists before any lead has been grown. But every other port's lead is metal too, and
+        // a port whose obstruction is another port's PARALLEL feed can never be cleared by growing:
+        // the obstruction grows with it, forever. So the leads are computed once, applied, and the
+        // question asked again from each port's NEW outer edge — and a port whose neighbourhood is
+        // still not clear has its neighbourhood term DROPPED rather than lengthened. It keeps
+        // whatever its cross-section asked for, the post-mesh clearance check breaches as it did
+        // before, and the port goes to PCAL4's calibration group (R-pcal7-3) or to the refusal.
+        //
+        // That is what makes non-convergence DETECTABLE instead of infinite, and it is why this is
+        // one step rather than an iteration to a limit: a second step could only re-discover the
+        // same parallel obstruction, and a lead that keeps growing is a mesh that keeps growing.
+        var pass = Core(problem, ports, cal, wanted, null, null, lengthFormat);
+
+        IReadOnlyDictionary<int, bool>? keep = null;
+        if (pass.Neighbour is { } asked)
+        {
+            var k = new Dictionary<int, bool>();
+            bool changed = false;
+            foreach (var (num, shortfall) in asked)
+            {
+                bool clear = shortfall <= 0 || pass.StillClear.Contains(num);
+                k[num]   = clear;
+                changed |= !clear;
+            }
+            if (changed) { keep = k; pass = Core(problem, ports, cal, wanted, keep, null, lengthFormat); }
+        }
+
+        // ── R-pcal7-3 — EVERY PORT THAT COULD SHARE A PLANE PEELS THE SAME LENGTH ────────────────
+        //
+        // Asked once, of the leads the passes above settled on, and acted on by running the same
+        // measurement again with a floor — rather than by editing the polygons a second time, which
+        // would be a second spelling of the extrusion and a second chance for it to differ.
+        var floors = CoplanarFloors(ports, pass.Leads);
+        if (floors is not null) pass = Core(problem, ports, cal, wanted, keep, floors, lengthFormat);
+
+        return (pass.Problem, pass.Leads, pass.Notes);
+    }
+
+    /// <summary>
+    /// <b>The longest lead among the ports that could share ONE reference plane</b>, per port, or
+    /// null when nothing has to grow.
+    ///
+    /// <para>"Could share a plane" is <c>TryFormCalibrationGroup</c>'s own test asked of the
+    /// artwork: the same conductor level, the same side, the same direction, and an end face at the
+    /// same station. Two ports whose DRAWN edges differ are declined by the group's plane test
+    /// whatever their leads are (PCAL5), so equalising them would grow metal for a group that
+    /// cannot form — this is deliberately not attempted there.</para>
+    /// </summary>
+    private static IReadOnlyDictionary<int, double>? CoplanarFloors(
+        IReadOnlyList<PlanarPort> ports, IReadOnlyList<PlanarFeedLead> leads)
+    {
+        if (leads.Count == 0) return null;
+
+        Dictionary<int, double>? floors = null;
+        foreach (var lead in leads)
+        {
+            var port = ports.FirstOrDefault(q => q.Number == lead.PortNumber);
+            if (port is null) continue;
+
+            foreach (var peer in ports)
+            {
+                if (peer.Number == lead.PortNumber) continue;
+                if (peer.Kind != PlanarPortKind.Edge || port.Kind != PlanarPortKind.Edge) continue;
+                if (peer.Side != port.Side || peer.Direction != port.Direction) continue;
+                if (peer.LayerIndex != port.LayerIndex) continue;
+
+                bool alongX = port.Direction == PlanarBasisDirection.X;
+                double peerS = alongX ? peer.Location.X : peer.Location.Y;
+                if (Math.Abs(peerS - lead.DrawnEdgeM) > 1e-9 * Math.Max(1.0, Math.Abs(lead.DrawnEdgeM)))
+                    continue;
+
+                double have = 0;
+                foreach (var l in leads) if (l.PortNumber == peer.Number) { have = l.LengthM; break; }
+                if (have >= lead.LengthM) continue;
+
+                floors ??= [];
+                floors[peer.Number] = Math.Max(floors.GetValueOrDefault(peer.Number), lead.LengthM);
+            }
+        }
+        return floors;
+    }
+
+    private readonly record struct CorePass(
+        PlanarProblem Problem,
+        IReadOnlyList<PlanarFeedLead> Leads,
+        IReadOnlyList<string> Notes,
+        IReadOnlyDictionary<int, double>? Neighbour,
+        IReadOnlySet<int> StillClear);
+
+    /// <summary>
+    /// One pass of the extension: measure every port's two shortfalls, take the larger, and extrude.
+    /// <paramref name="allowNeighbour"/> is null on the first pass and, on the second, carries the
+    /// verdict of the fixed-point step for each port that grew a neighbourhood lead.
+    /// </summary>
+    private static CorePass Core(PlanarProblem problem,
+                                 IReadOnlyList<PlanarPort> ports,
+                                 PlanarCalibrationSettings cal,
+                                 double wanted,
+                                 IReadOnlyDictionary<int, bool>? allowNeighbour,
+                                 IReadOnlyDictionary<int, double>? peerFloor,
+                                 SurfaceMesher.PlanarLengthFormat? lengthFormat)
+    {
+        var fmt = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
+        double drivenM  = cal.DrivenNeighbourClearanceHeights  * problem.Slab.HeightM;
+        double passiveM = cal.PassiveNeighbourClearanceHeights * problem.Slab.HeightM;
+
+        var neighbourAsked = new Dictionary<int, double>();
+        var stillClear     = new HashSet<int>();
 
         var leads = new List<PlanarFeedLead>();
         var notes = new List<string>();
@@ -183,6 +344,47 @@ public static class PlanarFeedExtension
 
             if (!usable) continue;
 
+            // ── R-pcal7-2 — THE SECOND SHORTFALL: THE FEED'S NEIGHBOURHOOD, NOT ITS CROSS-SECTION ──
+            //
+            // R-fed-1 asked one question — "is this feed the same width for the run the standard
+            // replaces?" — and that is only half of what makes a calibration standard describe the
+            // feed. The standard is an ISOLATED uniform line, so the other half is "is anything
+            // beside it for that run?", and the two failures amplify identically: the error box is
+            // measured on the wrong structure and D6's peel divides the mismatch by a₂₁².
+            //
+            // A spiral inductor is the case that reached a user. Its port sits on the outer turn,
+            // and 8 µm away — for hundreds of microns — is the next turn, which is the port's OWN
+            // NET. PCAL2's clearance check used to skip own-net metal entirely and reported both
+            // feeds clear while the published `.s2p` was an open circuit with a negative resistance
+            // at every AC point. R-pcal7-1 makes that metal visible; this is what does something
+            // about it.
+            //
+            // <b>The rule is exact rather than a heuristic: L ≥ endRun − u*</b>, where u* is how far
+            // inward from the drawn edge the offending metal first appears. Growing the feed by that
+            // much puts the whole of the standard's own run on line that has nothing beside it, and
+            // the lead comes off again as a matched section of the very line the calibration
+            // measured — so the user's reference plane stays on the user's own drawn metal edge.
+            double sectionAdd = add;
+            double neighbourAdd = 0, atM = double.NaN, acrossM = double.NaN;
+            if (allowNeighbour is null || (allowNeighbour.TryGetValue(port.Number, out bool ok) && ok))
+            {
+                foreach (var m in measured)
+                {
+                    var reach = NeighbourhoodRun(problem, PolysOn, ports, m.Layer, alongX, fromLow,
+                                                 m.EdgeS, m.TLo, m.THi, wanted, drivenM, passiveM);
+                    if (!(wanted - reach.ClearForM > neighbourAdd)) continue;
+                    neighbourAdd = wanted - reach.ClearForM;
+                    atM          = reach.AtM;
+                    acrossM      = reach.AcrossM;
+                }
+            }
+
+            if (neighbourAdd > 0) neighbourAsked[port.Number] = neighbourAdd;
+            add = Math.Max(add, neighbourAdd);
+
+            double floor = peerFloor is not null && peerFloor.TryGetValue(port.Number, out double fl) ? fl : 0;
+            add = Math.Max(add, floor);
+
             // Nothing shorter than the scan's own step, which is the resolution `have` was measured
             // at — below it the "shortfall" is quantisation, and growing a sliver of lead would put
             // the reference plane inside a single mesh cell for no gain.
@@ -218,10 +420,19 @@ public static class PlanarFeedExtension
                 list[m.PolyIndex] = grown;
             }
 
-            leads.Add(new PlanarFeedLead(port.Number, add, measured[0].EdgeS, measured[0].Have));
+            leads.Add(new PlanarFeedLead(port.Number, add, measured[0].EdgeS, measured[0].Have)
+            {
+                SectionShortfallM   = sectionAdd,
+                PeerFloorM          = floor,
+                NeighbourShortfallM = neighbourAdd,
+                NeighbourAtM        = atM,
+                NeighbourAcrossM    = acrossM,
+            });
         }
 
-        if (leads.Count == 0) return (problem, [], notes);
+        if (leads.Count == 0)
+            return new CorePass(problem, [], notes,
+                                neighbourAsked.Count == 0 ? null : neighbourAsked, stillClear);
 
         var layers = new PlanarConductorLayer[problem.Layers.Count];
         for (int i = 0; i < layers.Length; i++)
@@ -229,8 +440,161 @@ public static class PlanarFeedExtension
                 ? problem.Layers[i] with { Polygons = e }
                 : problem.Layers[i];
 
+        var grownProblem = problem with { Layers = layers };
+
+        // ── The fixed-point question, asked ONCE, from each port's NEW outer edge ────────────────
+        //
+        // Only of the ports that grew a neighbourhood lead, and only on the first pass — the second
+        // pass is acting on the answer and must not re-derive it.
+        if (allowNeighbour is null && neighbourAsked.Count > 0)
+            foreach (var lead in leads)
+            {
+                if (!neighbourAsked.ContainsKey(lead.PortNumber)) continue;
+
+                var port = ports.FirstOrDefault(q => q.Number == lead.PortNumber);
+                if (port is null) continue;
+
+                bool alongX  = port.Direction == PlanarBasisDirection.X;
+                bool fromLow = port.Side is PlanarPortSide.MinX or PlanarPortSide.MinY;
+                double newEdge = fromLow ? lead.DrawnEdgeM - lead.LengthM
+                                         : lead.DrawnEdgeM + lead.LengthM;
+
+                if (!TryLevelOf(grownProblem, port, out int layer)) continue;
+                var gPolys = grownProblem.Layers[layer].Polygons;
+                if (!TryEndFace(gPolys, port, out _, out _, out _, out double gLo, out double gHi))
+                    continue;
+
+                var again = NeighbourhoodRun(grownProblem, l => grownProblem.Layers[l].Polygons,
+                                             ports, layer, alongX, fromLow, newEdge, gLo, gHi,
+                                             wanted, drivenM, passiveM);
+                if (again.ClearForM >= wanted) stillClear.Add(lead.PortNumber);
+            }
+
         notes.Add(FeedNote(leads, wanted, fmt));
-        return (problem with { Layers = layers }, leads, notes);
+        return new CorePass(grownProblem, leads, notes,
+                            neighbourAsked.Count == 0 ? null : neighbourAsked, stillClear);
+    }
+
+    /// <summary>
+    /// <b>R-pcal7-2 — how far inward from the port's own end face the feed has nothing beside it</b>,
+    /// capped at <paramref name="wanted"/>, together with where the first offending metal is.
+    ///
+    /// <para>This is <see cref="PlanarPorts.MeasureFeedClearance"/>'s question asked of the ARTWORK
+    /// rather than of the mesh, because the lead has to be grown before there is a mesh to ask. The
+    /// post-mesh check then CONFIRMS — and where it still breaches, that is the refusal, with no
+    /// loop. The two are deliberately the same predicate with the same two thresholds: a scan that
+    /// measured something the clearance check does not would grow leads nothing needed, and one that
+    /// measured less would grow leads that do not clear.</para>
+    ///
+    /// <para><b>Metal that OVERLAPS the feed's own transverse span is not a neighbour here</b>, for
+    /// the same reason it is not one there: it is in line with the feed, which is
+    /// <see cref="UniformRun"/>'s question and R-fed-1's answer.</para>
+    ///
+    /// <para><b>The class is read off the artwork, and it is read conservatively.</b> A polygon that
+    /// a port's own label sits on takes the DRIVEN threshold; everything else takes the PASSIVE one.
+    /// On the mesh the same question is asked of the CONDUCTOR — every polygon its component
+    /// reaches, through touching metal and through vias — and there is no connectivity on a bare
+    /// polygon list to ask it of. The two can therefore disagree in exactly one direction: a
+    /// port-carrying net drawn as several polygons, whose offending piece carries no port itself,
+    /// is measured against the passive threshold here and the driven one there. <b>That is a lead
+    /// not grown, never a lead grown wrongly</b> — the run then breaches the post-mesh check and is
+    /// refused by name, which is the behaviour that shipped before this brief. A silently published
+    /// wrong answer is not reachable from the disagreement.</para>
+    /// </summary>
+    private static (double ClearForM, double AtM, double AcrossM) NeighbourhoodRun(
+        PlanarProblem problem, Func<int, IReadOnlyList<PlanarPolygon>> polysOn,
+        IReadOnlyList<PlanarPort> ports, int level, bool alongX, bool fromLow,
+        double edgeS, double tLo, double tHi, double wanted, double drivenM, double passiveM)
+    {
+        double dir      = fromLow ? 1.0 : -1.0;
+        double width    = tHi - tLo;
+        double sliceTol = 1e-9 * Math.Max(width, 1e-12);
+        double tMid     = 0.5 * (tLo + tHi);
+
+        bool   onFeed = true;
+        double last   = wanted;
+
+        for (int k = 1; k <= UniformitySamples; k++)
+        {
+            double d = wanted * k / UniformitySamples;
+            double s = edgeS + dir * d;
+
+            // ── THE FEED'S OWN CROSS-SECTION AT THIS STATION, AND NOTHING ELSE ───────────────────
+            //
+            // The maximal run of metal containing the port's own transverse midpoint, ON THE PORT'S
+            // OWN LEVEL. A taper's flare, a pad, a bend's corner are all this run getting wider —
+            // metal IN LINE WITH the feed, which is R-fed-1's question and which UniformRun already
+            // measures and grows a lead for. Counting it as a neighbour instead would re-fire the
+            // clearance refusal on every taper in the repository, which is what the skip this brief
+            // removes was protecting.
+            var band = onFeed ? FeedSpan(polysOn(level), alongX, s, tMid, sliceTol) : null;
+
+            // ── WHERE THE FEED ENDS, EVERYTHING AFTER IT IS SOMETHING ELSE ──────────────────────
+            //
+            // A pad that stops and a coil that starts 10 µm later is not a wider feed; it is a
+            // different structure in the feed's own path, reached through a via on another level.
+            // UniformRun reads it as a SHORT feed and says so by design (a line shorter than the
+            // standard's run is not a non-uniform one), so without this the shipped spiral's second
+            // port measured "uniform for the whole 300 µm" while its lead ran into the coil body
+            // 40 µm in. Once the run containing the midpoint is gone it does not come back: metal
+            // at the midpoint after a gap is a neighbour at zero clearance, not a resumption.
+            if (band is null) onFeed = false;
+
+            for (int lv = 0; lv < problem.Layers.Count; lv++)
+            {
+                var polys = polysOn(lv);
+                for (int pi = 0; pi < polys.Count; pi++)
+                {
+                    double need = CarriesAPort(problem, polys[pi], lv, ports) ? drivenM : passiveM;
+                    if (!(need > 0)) continue;
+
+                    foreach (var (a, b) in SpansAcross(polys[pi], alongX, s, sliceTol))
+                    {
+                        // The feed itself, and the feed's own run when it is still in one piece.
+                        if (a >= tLo - sliceTol && b <= tHi + sliceTol) continue;
+                        if (lv == level && band is { } bd &&
+                            a >= bd.A - sliceTol && b <= bd.B + sliceTol) continue;
+
+                        double across = b <= tLo ? tLo - b : a >= tHi ? a - tHi : 0;
+                        if (across < need)
+                            return (k == 1 ? 0 : wanted * (k - 1) / UniformitySamples, d, across);
+                    }
+                }
+            }
+            last = d;
+        }
+        return (last, double.NaN, double.NaN);
+    }
+
+    /// <summary>The transverse extent of the metal covering the port's own midpoint at this
+    /// station, or null where none does — which is the feed having ended.</summary>
+    private static (double A, double B)? FeedSpan(IReadOnlyList<PlanarPolygon> polys, bool alongX,
+                                                  double s, double tMid, double tol)
+    {
+        foreach (var poly in polys)
+            foreach (var (a, b) in SpansAcross(poly, alongX, s, tol))
+                if (tMid >= a - tol && tMid <= b + tol) return (a, b);
+        return null;
+    }
+
+    /// <summary>Whether any port stands on this polygon — see <see cref="NeighbourhoodRun"/> on why
+    /// the question is asked of the POLYGON here and of the conductor after meshing.</summary>
+    private static bool CarriesAPort(PlanarProblem problem, PlanarPolygon poly, int level,
+                                     IReadOnlyList<PlanarPort> ports)
+    {
+        var (bx0, by0, bx1, by1) = problem.Bounds();
+        double tol = 1e-6 * Math.Max(Math.Max(bx1 - bx0, by1 - by0), 1e-12);
+
+        foreach (var port in ports)
+        {
+            if (port.LayerIndex is { } given && given != level) continue;
+            if (!Polygon2D.ContainsOrOn(poly.Outer, port.Location, tol)) continue;
+            bool inHole = false;
+            foreach (var h in poly.HoleRings)
+                if (Polygon2D.ContainsStrict(h, port.Location)) { inHole = true; break; }
+            if (!inHole) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -623,18 +987,42 @@ public static class PlanarFeedExtension
     private static string FeedNote(IReadOnlyList<PlanarFeedLead> leads, double wanted,
                                    SurfaceMesher.PlanarLengthFormat fmt)
     {
+        // ── R-pcal7-2 — WHICH SHORTFALL GREW THE LEAD IS PART OF THE SENTENCE ───────────────────
+        //
+        // "60 µm on top of 239 µm it already had" means the metal changes WIDTH at the plane, and
+        // the remedy is to draw a uniform feed. A lead grown because a coil turn runs 8 µm away is a
+        // different fact with a different remedy — move the neighbour, or accept the lead — and a
+        // user chasing one sentence must not be handed the other.
         var parts = leads.Select(l =>
             $"port {l.PortNumber} {fmt(l.LengthM)}" +
-            (l.ExistingUniformM > 0 ? $" (on top of {fmt(l.ExistingUniformM)} it already had)" : ""));
+            (l.GrownForPeer
+                ? " (matched to the longest lead at this reference plane, so the ports that share " +
+                  "one calibration standard are peeled by one length)"
+             : l.GrownForNeighbour
+                ? $" (to clear other metal {fmt(l.NeighbourAcrossM)} away, which starts " +
+                  $"{fmt(l.NeighbourAtM)} in from the port)"
+                : l.ExistingUniformM > 0 ? $" (on top of {fmt(l.ExistingUniformM)} it already had)"
+                                         : ""));
 
-        return $"{leads.Count} port(s) sit on metal that changes cross-section inside the " +
+        bool anyNeighbour = leads.Any(l => l.GrownForNeighbour);
+        bool anySection   = leads.Any(l => !l.GrownForNeighbour);
+
+        string why =
+            anyNeighbour && anySection
+                ? "sit on metal that changes cross-section, or have other metal beside them, inside the"
+            : anyNeighbour
+                ? "have other metal beside them inside the"
+                : "sit on metal that changes cross-section inside the";
+
+        return $"{leads.Count} port(s) {why} " +
                $"{fmt(wanted)} of feed the calibration standard replaces, so a UNIFORM " +
                $"LEAD of the port's own width was added for the solve and removed again afterwards: " +
                string.Join(", ", parts) + ". Your reference planes are still your own drawn metal " +
                "edges — the lead is meshed, solved and then peeled as a matched section of the line " +
                "the calibration itself measured, so it changes where the error box is taken, not " +
-               "where the answer is reported. Without it the error box is measured on a straight " +
-               "line and applied to a flare, and the peel divides that mismatch by a₂₁² — which on a " +
-               "taper is a non-passive answer that reads as an open circuit.";
+               "where the answer is reported. The standard is an ISOLATED line of the port's own " +
+               "width, so a feed that either changes width or has a neighbour inside that run is " +
+               "not the structure the error box was measured on — and the peel divides that " +
+               "mismatch by a₂₁² — which is a non-passive answer that reads as an open circuit.";
     }
 }

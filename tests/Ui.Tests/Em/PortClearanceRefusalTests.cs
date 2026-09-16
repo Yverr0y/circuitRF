@@ -213,10 +213,12 @@ public sealed class PortClearanceRefusalTests(ITestOutputHelper output) : IDispo
 
         // …and so does the artefact, which is the half that survives being opened a month later
         // somewhere else. Read back off the file, not asserted on what was written.
+        // One line per fact declared, and this run declares more than one: R-pcal7-4 adds a second
+        // for a row that is not a passive network, which this fixture's bottom point is. The
+        // validity breach is the one this gate is about.
         var caveats = EmSnpProvenance.ReadCaveats(r.SnpPath!);
-        string caveat = Assert.Single(caveats);
-        output.WriteLine(caveat);
-        Assert.Contains("OUTSIDE", caveat, StringComparison.Ordinal);
+        foreach (string c in caveats) output.WriteLine(c);
+        string caveat = Assert.Single(caveats, c => c.Contains("OUTSIDE", StringComparison.Ordinal));
         Assert.Contains("port 1", caveat, StringComparison.Ordinal);
         Assert.Contains("de-embedding", caveat, StringComparison.OrdinalIgnoreCase);
     }

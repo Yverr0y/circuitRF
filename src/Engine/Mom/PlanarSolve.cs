@@ -1172,6 +1172,14 @@ public sealed class PlanarPortCalibrator
 }
 
 /// <summary>
+/// <b>R-pcal7-4 — one de-embedded point that came back non-passive</b>, and by how much.
+/// σ_max &gt; 1 is not a degraded answer; it is not a network at all, so the excess is a property of
+/// the ANALYSIS. Carried on the result rather than only written into a note, because the note does
+/// not survive onto the <c>.sNp</c> and the file is what a reader opens six months later (PCAL2).
+/// </summary>
+public sealed record PlanarPassivityExcess(double FrequencyHz, double SigmaMax);
+
+/// <summary>
 /// What one de-embedded frequency point cost and produced.
 ///
 /// <para><b>M2 — these are PER-SOLVE times and they no longer sum to wall clock.</b> The DUT and the
@@ -1272,6 +1280,13 @@ public sealed class PlanarSolveResult
 
     /// <summary>Which frequencies were solved, ascending. Empty when adaptive sampling is off.</summary>
     public IReadOnlyList<double> SolvedFrequencies { get; init; } = [];
+
+    /// <summary>
+    /// <b>R-pcal7-4 — every de-embedded point whose σ_max exceeds 1</b>, ascending in frequency, or
+    /// empty when the whole sweep is a network. The same measurement the run's own NOT PASSIVE note
+    /// is made from, handed to the caller so it can reach the file the notes do not.
+    /// </summary>
+    public IReadOnlyList<PlanarPassivityExcess> NonPassivePoints { get; init; } = [];
 
     /// <summary>
     /// <b>ANT-9 — did refinement actually converge?</b> True when every interval that stopped did so
@@ -1553,16 +1568,29 @@ public static class PlanarSolve
     /// and 0 on a point that carries no calibration at all (the 0 Hz row and LF2's substituted ones,
     /// which are not de-embedded and must never be dropped for a de-embedding diagnostic).
     /// </summary>
-    private static double PointFloor(PlanarFrequencyPoint pt)
+    private static double PointFloor(PlanarFrequencyPoint pt) => WorstFloorAt(pt).Floor;
+
+    /// <summary>
+    /// <b>LFP — the worst floor over a point's ports, WITH the term that set it.</b> The two terms
+    /// <see cref="PlanarErrorBox.DeembedErrorFloor"/> takes the larger of obey different frequency
+    /// laws — the standards' share falls as 1/f and the DUT's as 1/f² — so the band edge the remedy
+    /// sentence offers cannot be extrapolated without knowing which one is binding here.
+    /// </summary>
+    private static (double Floor, bool DutBound) WorstFloorAt(PlanarFrequencyPoint pt)
     {
-        if (!(pt.FrequencyHz > 0)) return 0;
+        if (!(pt.FrequencyHz > 0)) return (0, false);
         double worst = 0;
+        bool dut = false;
         foreach (var c in pt.Calibrations)
         {
             double v = c.Box.DeembedErrorFloor;
-            if (!double.IsNaN(v) && !double.IsInfinity(v) && v > worst) worst = v;
+            if (!double.IsNaN(v) && !double.IsInfinity(v) && v > worst)
+            {
+                worst = v;
+                dut   = c.Box.FloorIsDutBound;
+            }
         }
-        return worst;
+        return (worst, dut);
     }
 
     /// <summary>
@@ -1580,7 +1608,7 @@ public static class PlanarSolve
 
         foreach (var pt in points)
         {
-            double here = PointFloor(pt);
+            var (here, dutBound) = WorstFloorAt(pt);
             if (!(pt.FrequencyHz > 0) || pt.Calibrations.Count == 0) continue;
             any = true;
             if (here <= 0) continue;
@@ -1589,10 +1617,20 @@ public static class PlanarSolve
             else if (here >= PeelErrorBudgetDS) flagged.Add(pt.FrequencyHz);
             if (here > worst) { worst = here; worstHz = pt.FrequencyHz; }
 
-            // The 1/f law, read off THIS point: floor·f is the constant, so the budget is met above
-            // floor·f/budget. Taken over every point and kept at its largest, because a sweep that
-            // crosses a separation switch has more than one constant in it.
-            double implied = here * pt.FrequencyHz / PeelErrorBudgetDS;
+            // The law, read off THIS point, and WHICH law depends on which of the floor's two terms
+            // is binding here (LFP). The standards' residual rises as ω against an |a₂₁|² that rises
+            // as ω², so that share falls as 1/f and floor·f is the constant; the DUT's own share is
+            // a CONSTANT over the same ω², so it falls as 1/f² and floor·f² is the constant. Getting
+            // this wrong is not cosmetic: on the shipped spiral the 1/f reading of its 160 MHz row
+            // would name 2.4 GHz as the band edge where the measured one is 663 MHz, and a user
+            // would throw away most of a band that answers.
+            //
+            // Taken over every point and kept at its largest, because a sweep that crosses a
+            // separation switch — or the crossover between these two terms — has more than one
+            // constant in it.
+            double implied = dutBound
+                ? pt.FrequencyHz * Math.Sqrt(here / PeelErrorBudgetDS)
+                : pt.FrequencyHz * (here / PeelErrorBudgetDS);
             if (implied > above) above = implied;
         }
         if (!any) return null;
@@ -3955,7 +3993,12 @@ public static class PlanarSolve
             notes.Add(sentence);
         }
 
-        if (st.Deembed && PassivityNote(points, z0) is { } passivity) notes.Add(passivity);
+        IReadOnlyList<PlanarPassivityExcess> nonPassive = [];
+        if (st.Deembed)
+        {
+            nonPassive = PassivityExcesses(points, z0);
+            if (PassivityNote(nonPassive, points.Count) is { } passivity) notes.Add(passivity);
+        }
 
         // ── PCAL3 — THE INSTRUMENT'S OWN RESONANCE, NAMED RATHER THAN PUBLISHED SILENTLY ────────
         //
@@ -4134,6 +4177,7 @@ public static class PlanarSolve
             StandardCount = standards,
             CoreBuildMs   = coreBuildMs,
             Notes         = notes,
+            NonPassivePoints = nonPassive,
             FeedClearances = clearances,
             CapturedCurrents    = captured,
             CapturedFrequencyHz = capturedF,
@@ -4233,8 +4277,23 @@ public static class PlanarSolve
     /// requires and what the published matrix is not: per-port Z₀ may differ (a 50 Ω port and a 12 Ω
     /// port is the ordinary taper case) and may be complex. σ_max is reference-dependent, so asking
     /// it of the shipped matrix directly would flag perfectly passive networks.</para>
+    ///
+    /// <para><b>The measurement and the sentence are two functions since R-pcal7-4</b>, because the
+    /// answer is needed as DATA as well as as prose — see below, and
+    /// <c>EmSnpProvenance.ValidityCaveats</c>.</para>
     /// </summary>
-    private static string? PassivityNote(
+    /// <summary>
+    /// <b>Every de-embedded point that cannot be a network</b>, ascending in frequency. The
+    /// measurement the note below used to make and throw away.
+    ///
+    /// <para><b>R-pcal7-4 — it is returned as data because the note does not survive the file.</b>
+    /// That is PCAL2's own finding one step further on: a `.sNp` on disk carries no notes, and the
+    /// shipped spiral's bottom decade is exactly the case — 110 nH against a real 2.8 nH at
+    /// 160 MHz, with a 9 % passivity excess, at the end of a long notes list. The caveat line
+    /// <c>EmSnpProvenance</c> stamps onto the Touchstone is what a reader of that file gets
+    /// instead, and it needs the frequencies rather than a sentence.</para>
+    /// </summary>
+    private static IReadOnlyList<PlanarPassivityExcess> PassivityExcesses(
         IReadOnlyList<PlanarFrequencyPoint> points, IReadOnlyList<Complex> z0)
     {
         const double Tolerance = 1e-3;
@@ -4246,8 +4305,7 @@ public static class PlanarSolve
         var common = new Complex[z0.Count];
         Array.Fill(common, new Complex(50.0, 0.0));
 
-        double worst = 0, atHz = 0;
-        int over = 0;
+        var over = new List<PlanarPassivityExcess>();
         foreach (var pt in points)
         {
             double sigma;
@@ -4264,20 +4322,38 @@ public static class PlanarSolve
             }
 
             if (sigma <= 1.0 + Tolerance) continue;
-            over++;
-            if (sigma > worst) { worst = sigma; atHz = pt.FrequencyHz; }
+            over.Add(new PlanarPassivityExcess(pt.FrequencyHz, sigma));
         }
+        return over;
+    }
 
-        if (over == 0) return null;
+    private static string? PassivityNote(IReadOnlyList<PlanarPassivityExcess> over, int pointCount)
+    {
+        if (over.Count == 0) return null;
 
-        return $"NOT PASSIVE: {over} of {points.Count} de-embedded point(s) have σ_max(S) > 1, worst " +
-               $"{worst:F4} at {SurfaceMesher.Eng(atHz)}Hz. A passive structure cannot do that, so the " +
-               "excess is this analysis, not your design, and the s-parameters at those points should " +
-               "not be used. The usual cause is the de-embedding rather than the fill: D6's peel " +
-               "divides by a₂₁² (~1e4 at 1 GHz), so a small error in the error box becomes a large one " +
-               "in the answer. Check the port notes above for a feed the calibration could not be " +
-               "measured on, narrow the sweep to where the two-line calibration is well conditioned, " +
-               "or raise Cells per wavelength.";
+        double worst = 0, atHz = 0;
+        foreach (var e in over) if (e.SigmaMax > worst) { worst = e.SigmaMax; atHz = e.FrequencyHz; }
+
+        // ── R-pcal7-4 — THE FREQUENCIES, NOT JUST THE COUNT ──────────────────────────────────────
+        //
+        // "4 of 50 points" tells a user that some of their plot is wrong and not WHICH of it. On the
+        // shipped spiral the four are the bottom of the band, which is the decade a reader looks at
+        // first, and the numbers there are 30x out. The band is quoted the way PEEL's own drop note
+        // quotes its dropped points, because a user acts on it the same way — by moving the sweep's
+        // lower edge.
+        string which = over.Count == 1
+            ? $"at {SurfaceMesher.Eng(over[0].FrequencyHz)}Hz"
+            : $"from {SurfaceMesher.Eng(over[0].FrequencyHz)}Hz to " +
+              $"{SurfaceMesher.Eng(over[^1].FrequencyHz)}Hz";
+
+        return $"NOT PASSIVE: {over.Count} of {pointCount} de-embedded point(s) have σ_max(S) > 1, " +
+               $"{which}, worst {worst:F4} at {SurfaceMesher.Eng(atHz)}Hz. A passive structure cannot " +
+               "do that, so the excess is this analysis, not your design, and the s-parameters at " +
+               "those points should not be used. The usual cause is the de-embedding rather than the " +
+               "fill: D6's peel divides by a₂₁² (~1e4 at 1 GHz), so a small error in the error box " +
+               "becomes a large one in the answer. Check the port notes above for a feed the " +
+               "calibration could not be measured on, narrow the sweep to where the two-line " +
+               "calibration is well conditioned, or raise Cells per wavelength.";
     }
 
     /// <summary>

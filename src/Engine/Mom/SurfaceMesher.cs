@@ -318,7 +318,8 @@ public static class SurfaceMesher
         bool                accelerated   = false,
         PlanarLengthFormat? lengthFormat  = null,
         IReadOnlyList<PlanarPort>? ports  = null,
-        double              edgeRefinementCap = double.NaN)
+        double              edgeRefinementCap = double.NaN,
+        IReadOnlyList<PlanarFeedLead>? leads = null)
     {
         ArgumentNullException.ThrowIfNull(problem);
         var s = (settings ?? PlanarMeshSettings.Default).Resolved;
@@ -1233,7 +1234,8 @@ public static class SurfaceMesher
                                                       && !problem.RequiresGeneralKernel,
                                    fmt: fmt,
                                    coarsestPitch: pitch is null
-                                       ? 0 : Math.Max(pitch.MaxPitchX, pitch.MaxPitchY));
+                                       ? 0 : Math.Max(pitch.MaxPitchX, pitch.MaxPitchY))
+                    + GrownLeadClause(leads, fmt);
         else if (verdict == PlanarBudgetVerdict.Warn)
             notes.Add(accel
                 ? $"{n:N0} unknowns is within {1 - WarnFraction:P0} of the {ceiling:N0}-unknown " +
@@ -1453,6 +1455,39 @@ public static class SurfaceMesher
                "this kernel is built for." + why +
                " What acts on the count here: " + JoinOr(acts) + "." + how + " " + costNote;
     }
+
+    /// <summary>
+    /// <b>M4/R-pcal7-2 — when a lead this run GREW is part of why the count is over the ceiling, the
+    /// refusal has to say so.</b>
+    ///
+    /// <para>Every remedy in <see cref="BuildRefusal"/> is a setting or a piece of the user's own
+    /// artwork. A lead is neither: it is metal the solver added, it does not appear in the layout,
+    /// and a user measuring their part against the refusal's own numbers would be measuring the
+    /// wrong structure. It is appended rather than woven in because the refusal's remedies are
+    /// unchanged by it — a lead cannot be shortened without giving up the calibration it exists to
+    /// make valid, which is the trade this whole area refuses to make silently.</para>
+    /// </summary>
+    private static string GrownLeadClause(IReadOnlyList<PlanarFeedLead>? leads, PlanarLengthFormat fmt)
+    {
+        if (leads is null || leads.Count == 0) return "";
+
+        var parts = leads.Where(l => l.LengthM > 0)
+                         .Select(l => $"port {l.PortNumber} {fmt(l.LengthM)}")
+                         .ToList();
+        if (parts.Count == 0) return "";
+
+        return $" Part of this mesh is NOT your artwork: {string.Join(", ", parts)} of uniform feed " +
+               "was added by the solver before meshing, because the calibration standard is an " +
+               "isolated line of the port's own width and your feed either changes width or has " +
+               "other metal beside it inside the run the standard replaces. The lead is peeled off " +
+               "the answer again, so it does not move your reference planes — but it is meshed, and " +
+               "on a tensor grid its gridlines are paid for across the whole layout. Shortening it " +
+               "is not offered as a remedy: it is the length that makes the de-embedding valid, and " +
+               "trading that for mesh size silently is exactly what produces a published open " +
+               "circuit. Move the metal beside the port, or draw the feed at one width, and no lead " +
+               "is needed at all.";
+    }
+
 
     /// <summary>What to CALL a current model in a sentence a user reads. One place, because the mesher
     /// names it in a refusal and in two notes, and three spellings of one control is how a user ends

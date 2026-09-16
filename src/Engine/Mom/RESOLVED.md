@@ -3,6 +3,601 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## LFP — the low-frequency wall is the PORT, measured; two routes refuted and the guard that was silent (2026-09-15)
+
+`docs/sonnet-briefs/brief-em-lf2-port-discontinuity-as-a-lumped-element.md`. Owner report: commercial
+planar MoM solvers do not have the wall PCAL7 left behind — the shipped `examples/PDK PCells` spiral
+reads 31.6 nH at 320 MHz against 2.8-3.5 nH, and `DeembedErrorFloor`, the diagnostic built to say so,
+under-predicts the error by 40×.
+
+**Three of the brief's five milestones are NEGATIVE RESULTS and the fourth is what shipped.** M1
+measured ε and it cannot be moved; M2 refuted R-lfp-2 four independent ways, so M3 never ran; M4 —
+the floor — is built and gated; M5's own entry test PASSES on the first candidate and the port is
+not built, which is where the brief itself scopes it (*"naming the shape is as far as this brief
+goes"*).
+
+### 1. M0 — the console, and rebuild it before reading anything below
+
+A `dotnet` console referencing `src/Engine` only, holding a copy of `MmicCoilFixture`'s coordinates
+and a uniform-line fixture, driving `PlanarFeedExtension.Extend` → `SurfaceMesher.Mesh` →
+`PlanarPorts.ResolveAll` → `PlanarSolve.Run` and reading `PlanarFrequencyPoint.Calibrations`.
+**Release, and that matters: the coil at two frequencies with its four standards is 5.5 s built
+Release against minutes under `dotnet test`'s Debug.** Every number in this section came out of it.
+
+**Three traps, each of which produced a wrong table first:**
+
+- **The perturbation saturates, and the brief warned about it for good reason.** Sweeping η from
+  1e-13 to 1e-8 the slope is linear to three digits; at 1e-6 the answer has already moved by a full
+  unit of S and both frequencies report the same amplification, which is wrong and looks plausible.
+- **A uniform-line control on this stack is degenerate at the obvious mesh.** A 700 µm × 10 µm line
+  at `MinCellsAcrossConductor` = 2 meshes to **N = 10** — the transverse pitch binds and λ/20 does
+  not, exactly PEEL §8's trap on a different fixture — and its |a₂₁| comes back 16× the coil's,
+  because the gap is one cell wide and the cell is the whole line. `MeshFrequencyHz` = 1e12 gives
+  N = 837 and an |a₂₁| within 12 % of the coil's, which is what makes the two comparable at all.
+- **`PlanarDeembed.Apply`'s inverse needs its forward map written out to be trusted.** `raw = Γe +
+  T(I − SΓi)⁻¹ S T` round-trips through `Apply` to 8e-10 at 320 MHz — limited by the a₂₁² division,
+  not by the algebra — and §3's bound is worth nothing without that check.
+
+### 2. M1 — ε IS MEASURED, IT IS 5.1e-10, AND IT IS NOT WHAT THE WALL IS MADE OF
+
+Re-solving the coil's RAW s-parameters at one frequency with one knob moved at a time, calibration
+out of the path (`Deembed: false`), N = 1,697. Max |ΔS| against the shipped defaults:
+
+| knob | 320 MHz | 2.08 GHz |
+|---|---|---|
+| `Fill.SelfPanels` 4 → 6 | **5.08e-10** | **3.30e-09** |
+| `Fill.NearNodes` 10 → 14 | **3.74e-10** | **2.43e-09** |
+| `Fill.TouchPanels` 3 → 5 | 1.12e-10 | 7.26e-10 |
+| `Dcim.FitTolerance` 1e-8 → 1e-6 | 7.15e-12 | 8.85e-11 |
+| `Dcim.Samples` 512 → 384 / 768 / 1024 | 1.01e-12 / 2.58e-13 / 3.78e-13 | 7.78e-11 / 6.75e-11 / 4.58e-11 |
+| `Dcim.MaxOrder` 14 → 18 | 1.63e-19 | 8.11e-11 |
+| `Dcim.FarSamples` 192 → 384 | 4.09e-14 | 2.06e-11 |
+| `Fill.FarNodes` 3 → 6 · `FarRatio` 4 → 8 | 4.13e-15 · 2.46e-15 | 2.69e-14 · 1.59e-14 |
+| `Fill.MidNodes` 5 → 8 · `NearRatio` 1.6 → 3.2 · `RemainderNodesNear` 8 → 12 | ~5e-17 | ~1.5e-14 |
+| `UseSymmetricFactorization` false (LU, not LDLᵀ) | 3.52e-17 | 1.57e-16 |
+| `UseRadialTable` false · `TableCellFraction` 0.02 → 0.005 | ~5e-18 | ~6e-17 |
+| `Fill.Parallel` false — the accumulation order | **exactly 0** | **exactly 0** |
+| `Dcim.PathExtent` 300 → 3000 | **exactly 0** | **exactly 0** |
+
+**So ε = 5.1e-10 at 320 MHz and 3.3e-9 at 2.08 GHz, and its dominant contributor is the fill's
+SINGULAR quadrature — not the Green's-function fit, which is an order below it at the bottom of the
+band.** Two entries are exactly zero and both are worth keeping: the accumulation order is
+deterministic, so "reorder the arithmetic" is not a route; and `PathExtent` cannot be raised by hand
+because LF1's widening has already taken it to 29,850 at this frequency.
+
+**The decisive form, because a table of knobs invites the reply "but all of them together":** every
+knob above tightened AT ONCE, through the full calibrated path, moves the coil's 320 MHz inductance
+from **31.564227 nH to 31.564336 nH** — 1.1e-4 nH on a row that is 28 nH wrong — and its 2.08 GHz row
+from 3.480158 to 3.480150 nH.
+
+**ε IS NOT CONSTANT AND IT IS NOT 2e-8.** The brief infers ε ≈ 2e-8 from one published answer. Read
+per point as |ΔS| ÷ `PeelAmplification` against a series 0.7 Ω + 2.9 nH truth, it is **2.0e-8 /
+4.8e-8 / 7.6e-8 / 1.0e-7 / 1.3e-7** at 160 / 320 / 480 / 640 / 800 MHz — rising roughly as ω, and
+**40× to 250× above the 5.1e-10 the knobs can reach.** The gap is the DISCRETISATION: the meshed
+structure's own departure from the drawn one, which no knob touches and which §4 of the brief
+measures REFINING as a net loss on, because the port's gap is one cell wide.
+
+**M1's verdict is the one the brief said would send it onward: ε is a discretisation floor, a decade
+of it is not for sale, and neither R-lfp-2 nor R-lfp-3 is avoidable.**
+
+### 3. M2 — R-lfp-2 IS DEAD, FOUR WAYS, AND TWO OF THE FOUR KILL THE WHOLE FAMILY
+
+**(a) The brief's own comparison, in the right units, and there is no crossover anywhere.** §5 puts
+the dropped term `|a₁₁ + a₂₁ − 1|` beside the peel's error `ε·2/|a₂₁|²` and looks for a crossing.
+The two are not in the same units: the first is an error in the BOX and the second an error in the
+ANSWER. An error of δ in a₁₁ reaches the answer multiplied by the same `2/|a₂₁|²`, so **the
+amplifier is common to both and cancels, and the comparison is `|a₁₁ + a₂₁ − 1|` against `ε`**:
+
+| f (GHz) | 0.16 | 0.32 | 0.64 | 1.28 | 2.08 | 4.16 | 8.00 |
+|---|---|---|---|---|---|---|---|
+| \|a₁₁+a₂₁−1\|, coil | 8.86e-5 | 1.82e-4 | 3.68e-4 | 7.39e-4 | 1.20e-3 | 2.40e-3 | 4.61e-3 |
+| ÷ ε (2e-8) | **4,430** | 9,120 | 18,400 | 36,900 | 60,100 | 120,000 | **230,000** |
+| \|a₁₁+a₂₁−1\|, 10 µm line | 9.45e-5 | 1.96e-4 | 3.96e-4 | 7.95e-4 | 1.29e-3 | 2.59e-3 | 4.96e-3 |
+| ÷ ε | 4,730 | 9,790 | 19,800 | 39,700 | 64,700 | 129,000 | 248,000 |
+
+**At the very bottom of the band, dropping the box's non-series part throws away 4,400× more than
+the S-domain peel's own error, and the ratio only worsens upward.** Both cross-sections, no
+crossing, nowhere. **The brief's "the departure ∝ ω and therefore VANISHES exactly where the present
+method fails" is the error**: the departure is ∝ ω only because `a₂₁` is, and measured against the
+transmission it is being compared with, `|a₁₁ + a₂₁ − 1| / |a₂₁|` is a **CONSTANT 0.54-0.61 on the
+coil and 0.65-0.74 on the line** across a 50× band. The box is never a pure series element, least of
+all at the bottom.
+
+**(b) No inversion of the raw S can beat `1/|a₂₁|²`, and that is a bound rather than an argument.**
+R-lfp-2 proposes a different INVERSION of the same raw measurement, so its conditioning is bounded
+below by the reciprocal of the FORWARD gain — how far the raw S moves when the DUT's own S moves —
+evaluated at the TRUE answer. The 3×3 complex Jacobian of `raw = Γe + T(I − SΓi)⁻¹ S T` over
+(S₁₁, S₂₁, S₂₂) at a series 1 Ω + 3 nH:
+
+| f (GHz) | 0.16 | 0.32 | 0.64 | 1.28 | 2.08 | 4.16 | 8.00 |
+|---|---|---|---|---|---|---|---|
+| 1/σ_min(J) — the best ANY method can do | 1.62e8 | **4.27e7** | 1.10e7 | 2.66e6 | 9.26e5 | 1.65e5 | 2.16e4 |
+| `2/\|a₂₁\|²` — what the peel does | 7.49e7 | **2.08e7** | 5.37e6 | 1.35e6 | 5.14e5 | 1.29e5 | 3.47e4 |
+
+**The peel is within a factor of 2 of the information-theoretic optimum at every frequency.** The
+amplification is not an artefact of doing the algebra in S; it is the ratio of the port
+discontinuity's impedance to the DUT's, and the S-domain quotient merely reports it. This kills the
+whole family — Z, Y, ABCD, lumped or not — and not only the series-element member.
+
+**(c) A PERFECT error box buys 2 %.** The standards' whole share of the realised error is
+`ConsistencyResidual × PeelAmplification` = **1.106e-2 at 320 MHz against a realised 0.499**. Even if
+the box were supplied exactly, 0.49 of the 0.50 would remain.
+
+**(d) The half of R-lfp-2 that is about supplying the box from up the band was already refuted, by
+PEEL §5(b), and the brief did not notice.** Fitting `(1−a₁₁)/ω`, `a₂₁/ω`, `(1−a₂₂)/ω` from the
+well-conditioned top and evaluating below gives |S₁₁| ≈ 1.0 at every frequency on three fixtures.
+The reason is the same 1/ω one: the required RELATIVE accuracy on the leading coefficient tightens as
+1/f.
+
+**M3 was not attempted, on M2's instruction to itself** — *"if it does not exist, the route is dead
+and the measurement says so in an afternoon"*.
+
+### 4. M2(a) — THE IMPLIED SERIES ELEMENT IS REAL, AND THE BRIEF'S FORMULA FOR IT IS WRONG BY 56 %
+
+The brief asks whether the implied Z's real part is genuine or an artefact of the same cancellation,
+noting Q ≈ 9 "which is not a capacitor". **Both halves are the formula, not the physics.**
+`Z = 2Z₀·a₁₁/a₂₁` assumes a series element between two ports at the SAME reference impedance. The
+error box's external side is the raw Z₀ = 50 Ω and **its internal side is the line's own Z_c — 99.73
+− j21.50 Ω on this port**, which is what `PlanarDeembed`'s own D7 header says it is. For a series Z
+between unequal references the surviving relation is `a₁₁ = 1 − 2Z₀/(Z + Z₀ + Z_c)`, hence
+`Z ≈ 2Z₀/(1 − a₁₁)`:
+
+| f (GHz) | `2Z₀·a₁₁/a₂₁` (the brief) | C | Q | `2Z₀/(1 − a₁₁)` | C | Q | the run's own raw Z₁₁ |
+|---|---|---|---|---|---|---|---|
+| 0.16 | 1.12e5 − j6.02e5 | 1.653 fF | 5.4 | 299 − j4.098e5 | **2.4276 fF** | 1,370 | 229 − j4.111e5 |
+| 0.32 | 3.43e4 − j3.20e5 | 1.553 fF | 9.3 | 184 − j2.049e5 | **2.4276 fF** | 1,114 | 115 − j2.055e5 |
+| 1.28 | 2.44e3 − j8.23e4 | 1.512 fF | 33.8 | 97.9 − j5.122e4 | **2.4276 fF** | 523 | 28.8 − j5.138e4 |
+| 2.08 | 9.92e2 − j5.07e4 | 1.510 fF | 51.1 | 86.9 − j3.152e4 | **2.4276 fF** | 363 | 17.8 − j3.162e4 |
+| 8.00 | 1.53e2 − j1.32e4 | 1.511 fF | 86.1 | 73.9 − j8.195e3 | **2.4276 fF** | 111 | 4.9 − j8.210e3 |
+
+**`2Z₀/(1 − a₁₁)` gives 2.4276 fF at all seven frequencies to FIVE DIGITS over a 50× band**, and its
+reactance tracks the run's own raw Z₁₁ to 0.3-0.6 % at every point; the same measurement on the 10 µm
+line gives **2.3234 fF**, likewise to five digits. The brief's formula drifts 9 % and reports a Q of
+5.4 rising to 86. **So the gap's series capacitance is as real and as lumped as §5 claims — more so —
+and its real part is a 1,100-Q loss term, not the Q ≈ 9 that looked like a cancellation artefact.**
+None of which rescues the route: §3 is about conditioning, and a perfectly known element removed
+perfectly still cannot beat the forward gain.
+
+### 5. M4 — THE FLOOR, WHICH IS WHAT SHIPPED
+
+`PlanarErrorBox.DeembedErrorFloor` becomes
+`max(ConsistencyResidual, DutRawErrorFloor) × PeelAmplification`, with
+**`PlanarErrorBox.DutRawErrorFloor` = 2e-8** a documented `const` beside it, and a companion
+`FloorIsDutBound` saying which term won. No constructor churn, no new cube, no new threshold — PEEL's
+0.05 and 0.25 are untouched and so is everything that reads them.
+
+**The brief's literal remedy does not work and M1 is why.** It asks for "ε measured once under
+R-lfp-1", and R-lfp-1's ε is 5.1e-10 — **below `ConsistencyResidual` on every fixture in the
+repository**, so `max()` with it changes nothing and the guard stays silent. The constant that fires
+is the DISCRETISATION share, which M1 also measured: **2.0e-8 / 4.8e-8 / 7.6e-8 / 1.0e-7 at 160 / 320
+/ 480 / 640 MHz, and the SMALLEST is taken, because a floor must not over-claim.**
+
+On the reported spiral, before and after:
+
+| f | residual | amplification | floor WAS | floor IS | realised \|ΔS\| | door |
+|---|---|---|---|---|---|---|
+| 160 MHz | 5.365e-10 | 3.747e+07 | 2.010e-2 | **0.749** | 0.758 | **dropped** |
+| 320 MHz | 1.065e-09 | 1.038e+07 | 1.106e-2 | **0.208** | 0.499 | flagged |
+| 480 MHz | 1.579e-09 | 4.727e+06 | 7.463e-3 | **0.0945** | 0.359 | flagged |
+| 640 MHz | 2.069e-09 | 2.684e+06 | 5.552e-3 | **0.0537** | 0.278 | flagged |
+| 800 MHz | 2.528e-09 | 1.725e+06 | 4.361e-3 | 0.0345 | 0.226 | clean — and σ_max < 1 here |
+| 2.08 GHz | 4.186e-09 | 2.569e+05 | 1.075e-3 | 5.14e-3 | — | clean; 3.480158 nH, unmoved |
+| 8.00 GHz | 1.145e-07 | 1.734e+04 | 1.985e-3 | 1.985e-3 | — | the residual binds again |
+
+**It still under-predicts, by up to 5×, and it says so.** It is a floor: 0.99× of the realised error
+at 160 MHz, 0.19× at 640 MHz, never over.
+
+**The band edge the remedy sentence offers had to learn a second law, and that is not cosmetic.**
+The residual rises as ω against an |a₂₁|² that rises as ω², so the standards' share falls as 1/f;
+the DUT's share is a constant over the same ω² and falls as **1/f²**. `MeasurePeelConditioning`
+branches on `FloorIsDutBound`. Read under the 1/f² law all five of the spiral's low rows name the
+same edge to 7 % — **663-671 MHz**, which is the run agreeing with itself, since 800 MHz is its first
+passive row. Under the 1/f law the same five would span 552 MHz to **2.40 GHz**, the sentence would
+quote the largest, and a user would throw away most of a band that answers.
+
+**What no uniform line does, and the one that nearly does.** On every fixture PEEL measured, the
+standards' residual (1.8e-8 to 5.6e-4) is the larger term, so those floors are unchanged to the last
+bit and `PeelConditioningTests` re-solves all of them green with no re-blessed number. **The one that
+comes within 10 % is GaAs 0.1 mm coarse at 10 MHz**, whose 1.82e-8 residual is just under the
+constant: its floor moves 4.22e-2 → 4.63e-2, crosses no threshold and changes no verdict. It is
+carved out into its own gate rather than left to be found, because "no uniform line moved at all"
+was the easy claim and it is not quite true.
+
+**Consequence for the shipped example, which is a behaviour change and not a gate:** `circuitrf em`
+on `examples/PDK PCells/SpiralInductor/em/SpiralInductor.cem` now leaves the 160 MHz row OUT of the
+`.sNp` and names it, so PCAL7 §11's non-passive caveat will read 3 rows (320-640 MHz, worst σ_max
+1.0384) where it read 4. That is the guard doing what PEEL built it for — the worst row is the one
+removed — and `DeembedOutsideCalibrationValidity` still puts it back bit-identically. **Not
+re-measured end to end through the CLI**, on the standing instruction to keep EM runs short; the
+engine-level measurement above is on the same mesh and reproduces PCAL7 §10's table row for row.
+
+### 6. M5 — R-lfp-3's ENTRY TEST PASSES ON THE FIRST CANDIDATE, AND THE PORT IS NOT BUILT
+
+The brief's own cheapest test of any candidate, and the one it says comes before all the rest:
+**solve one uniform line at two frequencies a decade apart and read how much of the structure
+survives to the raw measurement.** Run on the port kind this kernel ALREADY has that is the right
+shape — `PlanarPortKind.Internal`, the metal against the GROUND PLANE through a via, which is
+`PlanarDcSolve`'s conduction terminal one dimension over. Same 700 µm × 10 µm line, N = 837 and 860,
+no calibration in either path:
+
+| f | edge delta gap, raw \|S₂₁\| | dB/octave | ground-referenced, raw \|S₂₁\| | dB/octave |
+|---|---|---|---|---|
+| 100 MHz | 8.283e-07 (−121.64 dB) | — | **0.99395** (−0.05 dB) | — |
+| 200 MHz | 1.657e-06 (−115.62 dB) | **+6.02** | 0.99393 | **−0.00** |
+| 400 MHz | 3.313e-06 (−109.59 dB) | **+6.02** | 0.99378 | **−0.00** |
+| 1 GHz | 8.285e-06 (−101.63 dB) | **+6.02** | 0.99310 | **−0.00** |
+
+**A delta-gap-fed 700 µm piece of metal reads as −121.6 dB of insertion loss at 100 MHz, rising at
+exactly 6 dB per octave** — §10.13(a)'s measurement, reproduced on the GaAs stack — **and a
+ground-referenced port reads the same metal as 0.994 through, flat across the decade.** No error
+box, no a₂₁, no 1/|a₂₁|², nothing to de-embed and no wall.
+
+**So the owner's premise is confirmed and located.** The wall is a property of the DELTA GAP, not of
+the method of moments, not of the layered Green's function, not of the calibration and not of this
+part — and the fill, the excitation and the solve already handle a ground-referenced port correctly
+at the bottom of a band.
+
+**It is NOT a drop-in and nothing here says it is.** A via to the plane under each end is a different
+circuit from a series-fed line; nobody measuring a spiral's two terminals can substitute one. What
+R-lfp-3 needs is that terminal PAIR at a conductor's end FACE with the return through the medium
+rather than down drawn metal. What this measures is that the pair is the half that matters, and that
+whoever builds it has a working reference for the excitation, the sign convention and the
+no-calibration path already in the tree (§"The internal port", 2026-08-25).
+
+**Not built, and that is the brief's own scope** — *"Naming the shape is as far as this brief goes;
+what it must satisfy is the test above."* It remains additive-and-off-by-default work touching the
+port operator, the excitation, the calibration standards, the reference impedance and every recorded
+number in `HISTORY.md`.
+
+### 7. Gates
+
+- **Routine tier** — `tests/Engine.Tests/Mom/LowFrequencyPortWallTests.cs`, 19 tests in **21 ms**.
+  The floor is a pure function of three scalars already on `PlanarErrorBox`, so every DECISION —
+  which term binds, what the floor reads, which threshold it crosses, which band edge the sentence
+  can offer — is arithmetic and costs nothing. The spiral's four bad rows are asserted in BOTH
+  columns: that the new floor fires is half the claim and that the old one did not is the other
+  half, which is what makes it a test about a defect rather than about a threshold someone moved.
+- **`Category=Benchmark`** — `tests/Engine.Tests/Mom/LowFrequencyPortWallPhysicsTests.cs`, 3 tests in
+  **1 m 27 s**. The spiral's rows actually leaving by the guard's doors, PCAL7's 2.08 GHz row
+  unmoved at 3.480158 nH, and §6's entry test.
+- Unchanged and passing: `PeelConditioningTests` (11), the whole of `Engine.Tests`' Mom set (1,174
+  routine), and `Ui.Tests`' EM set.
+
+### 8. Reported to the owner, by file and line (no `CLAUDE.md` edit, per the standing rule)
+
+- **`tests/Ui.Tests/Em/PlanarRunTests.cs:195` — `TheQuasiStaticZcCaveat_IsInTheRunsNotes` is RED at
+  HEAD and was red before this work.** It asserts the note contains `"QUASI-STATIC"` and
+  `"+6.3% at 20 GHz"`; PEEL §6b rewrote that note on 2026-09-14 to *"The reported Z_c is a
+  quasi-static estimate … 6% at 20 GHz"*, and this assertion was not re-pointed with the other one
+  that was. Nothing in this brief touches `PlanarKernel.QuasiStaticNote` or that file. Left alone
+  rather than re-blessed, because re-pointing someone else's assertion is how a note's wording
+  changes twice without anyone deciding to.
+- **`docs/design/mom-engine.md` §10.13's closing paragraph** says the port change "would have an a₂₁
+  that does not vanish with ω" in the conditional. §6 above measures it, on a port kind the tree
+  already has. That paragraph can stop hedging.
+
+## PCAL7-OWNNET — a port feed that runs beside its OWN net, so a spiral inductor simulates as drawn (2026-09-15)
+
+`docs/sonnet-briefs/brief-em-pcal7-own-net-feed-neighbourhood.md`. **The brief's tag is `R-pcal7-n`
+and there is already a §PCAL7 in this file** (the mode-separation refusal, 2026-09-13); they are
+unrelated and the collision is the brief's, not a renaming of that work. This section is the
+own-net one.
+
+Owner report: a 3-turn `KIT_SPIRAL` on the shipped `examples/PDK PCells` GaAs 2LM stack, swept
+0–8 GHz at 51 points with everything left at its default, publishes an OPEN CIRCUIT — every AC point
+with a negative resistance, `|S₁₁|` over 1 from 0.32 to 1.12 GHz, and a reactance following no L law
+at all. The one correct row is 0 Hz, which comes from `PlanarDcSolve` and never touches any of this.
+
+**What the run said about it was two sentences that were actively misleading:**
+
+> `note: Port 1's feed is clear: no other conductor within the 300 µm of line the calibration standard reproduces.`
+
+Both feeds have metal **8 µm** away running parallel to them for hundreds of microns. PCAL2's
+clearance check — the check that exists to refuse exactly this — reported them clear, because the
+metal 8 µm away is **the port's own net**. On a spiral it always is.
+
+### 1. The mechanism, and why the skip was there
+
+`MeasureFeedClearance` classified neighbour metal and then
+
+```csharp
+int label = conn.LabelOf(ci);
+if (mine.Contains(label)) continue;   // the port's own net, not a neighbour
+```
+
+so own-net metal was never measured, `Breached` came back false, and `PlanarSolve`'s driven-breach
+branch never called `TryFormCalibrationGroup`. The port kept D6's **scalar** error box, measured on
+an **isolated uniform line** of its own width. The peel then forms
+`y_ij = (S_meas,ij − δ_ij·a₁₁)/(a₂₁(i)·a₂₁(j))` with `a₂₁² ~ 1e-4`, so an error box that is the wrong
+structure becomes an open circuit — the same amplification `PlanarFeedExtension.cs`'s header already
+documents for a taper.
+
+**The skip's stated rationale is sound and does not cover this case.** *"A flare or pad on the port's
+own net is R-fed-1's job, it grows a collinear lead and peels it exactly"* — true of metal **in line
+with** the feed. A **parallel return run** of the same net is a different object, and it is what a
+spiral inductor is made of.
+
+### 2. What was NOT the cause — measured, and cheap to repeat
+
+| control | L at 2 GHz | verdict |
+|---|---|---|
+| 0.7 mm straight Metal1 line | 1.391 nH | ✅ |
+| the same line broken by a Metal2 underpass and two vias | 1.419 nH | ✅ multi-level + via path innocent |
+| 90° bend, 0.6 mm | 1.529 nH | ✅ corners innocent |
+
+The meshed coil is also **not severed** — one conducting component carrying both ports — and the
+wrong answer is mesh-invariant: it converges, to the wrong number.
+
+### 3. The A/B that isolates it, reproduced exactly
+
+Two structures with the same arms and the same 50 µm gap, differing only in whether the coupling is
+inside the calibration standard's 300 µm window at the ports (`PlanarOwnNetFixtures`, `Mesh`):
+
+| fixture | before | σ_max | after | σ_max |
+|---|---|---|---|---|
+| `Splay` — feeds 340 µm apart, coupling starts 400 µm in | 3.2519 nH | 0.99448 | 1.5265 nH | 0.99977 |
+| `Coupled` — coupled 50 µm all the way to the ports | **135.612 nH** | **1.00366** ❌ | **1.1646 nH** | 0.99982 ✅ |
+
+A 116× error, produced by moving the coupling into the port's window and nothing else.
+
+### 4. R-pcal7-1 — own-net metal is a neighbour, but its own FLARE is not
+
+Deleting the skip outright is wrong and the measurement says so: it re-fires PCAL2's refusal on
+**every taper and every pad in the repository**. `EmCeilingRefusalTests`' own 13.1 mm → 299 µm
+Klopfenstein came back refused with *"port 2 has other metal 203.9 µm away"* — which is its own
+flare, 4.8 mm of it, monotonically widening.
+
+**The discriminator is not the NET, it is whether the metal is CONTINUOUS with the feed across the
+section.** So the exemption is the run itself: `PlanarPorts.FeedBands` walks inward column by column
+on the port's own level and, at each, takes the maximal unbroken band of cells containing the port's
+profile. A flare is inside it; a conductor with a gap between it and the feed is not, whoever owns
+it. Own-net metal outside the band lands in the DRIVEN class by construction — the port's own
+conductor carries this very port — so the 5 h threshold it now takes is the one PCAL1 measured.
+
+**Two traps in that walk, both found by a red test rather than by reading:**
+
+- **The band is METAL, not CURRENT.** Asking `CarriesCurrent` punches a hole in the band at an
+  obliquely CUT rim, where a conformal cell can have its rooftops declined for not being
+  flow-simple, and everything beyond the hole reads as a neighbour.
+- **The skip is BY GRID INDEX, not by coordinate.** A cut cell's `Region` is the metal it holds, and
+  a **merged sliver's region covers more than its own grid rectangle** (R-cut-1). Comparing that
+  region against the band's gridlines fails for a cell that IS in the band — on the taper above, the
+  two cells at the flare's rim report metal out to 643.1 µm from a grid cell ending at 611.8.
+
+**Where the feed ENDS, the band is empty from there inward, and that is not a technicality.** The
+shipped spiral's port 2 sits on a 30 µm pad that stops, with the coil body starting 10 µm later and
+reached through a via on another level. A band that resumed there would call 250 µm of coil "the feed
+getting wider".
+
+**Measured effect of R-pcal7-1 alone:** the reported spiral **refuses**, with PCAL2's own sentence,
+instead of publishing an open circuit. `Straight`, `ViaHop` and `Bend` come back **bit-identical to
+twelve significant figures** (1.391026245606 / 1.419003477165 / 1.528748572685 nH), which is
+R-pcal4-1's own invariant and it holds.
+
+### 5. R-pcal7-2 — grow the feed until its NEIGHBOURHOOD is clear, and peel it exactly
+
+R-fed-1 with its trigger widened from *"the cross-section is not uniform for the end run"* to
+*"…or something is inside the clearance for the end run"*. `PlanarFeedExtension.NeighbourhoodRun`
+asks `MeasureFeedClearance`'s question of the **artwork**, because the lead has to be grown before
+there is a mesh to ask; the post-mesh check then CONFIRMS, and where it still breaches that is the
+refusal, with no loop.
+
+**The length rule is `L ≥ endRun − u*`**, where `u*` is how far inward from the drawn edge the
+offending metal first appears. It is exact, not a heuristic. On the reported artwork, unchanged:
+
+| lead grown on each port | clearance verdict | L at 2 GHz | σ_max |
+|---|---|---|---|
+| none (today) | "feed is clear" (wrongly) | 33.47 nH, R = −13.78 Ω | 1.0126 ❌ |
+| **262.5 µm** | **clear** | **3.538 nH, R = +0.57 Ω** | 0.99764 ✅ |
+
+262.5 µm is `endRun` (3 h = 300 µm) less the scan's own last clear station, and port 1's obstruction
+is the next turn — **8 µm across, 42 µm in**, which is the report's own geometry. At the next mesh up
+the coil reads 3.582 nH, so it is converged to ~1 %; modified-Wheeler for 3 turns of 10 µm on an 8 µm
+pitch with a 120 µm opening is 2.48 nH.
+
+**Three things that make the rule work, and each was a defect before it was a line of code:**
+
+- **The class is read off the artwork CONSERVATIVELY.** A polygon a port stands on takes the DRIVEN
+  threshold; everything else takes the PASSIVE one. On the mesh the same question is asked of the
+  CONDUCTOR — every polygon its component reaches, through touching metal and through vias — and
+  there is no connectivity on a bare polygon list to ask it of. The two can disagree in exactly one
+  direction: a port-carrying net drawn as several polygons whose offending piece carries no port is
+  measured against the passive threshold here and the driven one there. **That is a lead not grown,
+  never a lead grown wrongly** — the run then breaches the post-mesh check and is refused by name.
+  A silently published wrong answer is not reachable from the disagreement.
+- **One fixed-point step, and deliberately not a loop.** Every other port's lead is metal too, and a
+  port whose obstruction is another port's PARALLEL feed can never be cleared by growing: the
+  obstruction grows with it, forever. The leads are computed once, applied, and the question asked
+  again from each port's NEW outer edge; a port still not clear has its neighbourhood term DROPPED
+  rather than lengthened, keeps whatever its cross-section asked for, and goes to R-pcal7-3's group
+  or to the refusal. That is what makes non-convergence detectable instead of infinite.
+- **The note says WHICH shortfall grew the lead.** "60 µm on top of 239 µm it already had" means the
+  metal changes width at the plane; a lead grown because a coil turn runs 8 µm away is a different
+  fact with a different remedy.
+
+### 6. R-pcal7-3 — the own-net calibration group, and its leads
+
+`TryFormCalibrationGroup` **already declined own-net metal by name** — *"a standard reproducing it
+would be two conductors the structure shorts together somewhere this profile cannot see"* — a
+sentence that was unreachable, because the breach that would call it never fired. **The objection is
+not borne out**: the error box is a local property of the cross-section and the excitation, and the
+DUT's topology beyond the reference plane does not enter it.
+
+| `Coupled` | L at 2 GHz | \|S₂₁\| | σ_max |
+|---|---|---|---|
+| decline standing | 135.612 nH | 0.0586 | 1.00366 ❌ |
+| decline lifted | **1.1646 nH** | 0.9800 | 0.99982 ✅ |
+
+against a two-wire estimate of ≈ 1.0–1.3 nH.
+
+**A group's members are grown to ONE lead length.** `CommonPeelLength` refuses a group whose leads
+differ — rightly: a mode is a combination of the group's conductors, so "how far has this mode
+travelled" has one answer for the group or none — and R-pcal7-2 produces leads differing by microns
+routinely. `PlanarFeedExtension.CoplanarFloors` grows the shorter members to the longest, which costs
+accuracy nothing because a longer lead is still a uniform section of the same cross-section. The
+`UnevenPads` fixture is the case: two feeds at one plane on 60 µm and 40 µm pads, leads 243.75 µm and
+262.5 µm before, both 262.5 µm now — **100.87 nH and σ_max 1.0045 before, 1.1849 nH and passive
+after.**
+
+### 7. M1's question, and the oracle that settled it
+
+**`Splay` passes today with no flag on it, and this work changes its published answer by 2×** —
+3.2519 nH to 1.5265 nH. Both are passive, both are plausible, and nothing in the run says which to
+believe. The brief's instruction was to settle it with a control before shipping, and to **stop and
+report if the control says the grouped path is the worse of the two**.
+
+**The control is a uniform coupled section cascaded with itself.** De-embedded, a section of length ℓ
+cascaded with itself must equal the same section de-embedded at 2ℓ; the identity is a property of a
+uniform line and of an exact de-embedding, so the residual between `T(2ℓ)` and `T(ℓ)²` is the
+instrument's own error and needs no external model. Two coupled lines, ports at all four ends, 2 GHz:
+
+| separation | ℓ | grouped | per-port | grouped σ_max | per-port σ_max |
+|---|---|---|---|---|---|
+| 18 µm | 400 µm | 7.70e-2 | 2.53e+0 | 0.99997 | 1.00501 |
+| 18 µm | 800 µm | **1.30e-2** | 4.42e+0 | 0.99993 | 1.00180 |
+| 50 µm | 400 µm | 6.82e-2 | 1.56e+0 | 0.99996 | 1.00373 |
+| 50 µm | 800 µm | **1.24e-2** | 2.15e+0 | 0.99992 | 1.00369 |
+| 350 µm | 400 µm | 7.27e-2 | 2.43e-1 | 0.99996 | 1.00681 |
+| 350 µm | 800 µm | **1.20e-2** | 2.14e-1 | 0.99991 | 1.00136 |
+
+**The grouped path is better at every separation and every length, by 1 to 2.5 orders of magnitude,
+and it is passive at every point where the per-port path is not.** At 350 µm — `Splay`'s own
+separation — it is 18× better. So `Splay`'s new 1.5265 nH is the better answer and the 3.2519 nH it
+used to publish is the worse one. The control does not invert M3.
+
+### 8. What this does NOT fix, and must keep refusing
+
+`Hair50` — a 300 µm hairpin whose U-turn sits **inside** the 300 µm end run — refuses, and should.
+No lead and no group can reproduce a feed that bends within the length the standard replaces; PCAL4's
+own uniformity rule declines the group by name, and the decline travels with the refusal. It is a
+strict improvement on the 159.297 nH it used to publish in silence.
+
+`TryWidenForNeighbours`' own-net decline stays a decline and stays **unreachable**: `mine ⊆ driven`
+by construction, so a passive breach is never own-net and the driven check above it fires first.
+PCAL3's widened neighbour is *floating at zero net charge*, which an own-net conductor is not, and
+inventing a third boundary condition is not this brief.
+
+### 9. M4 — what a grown lead costs, and the ceiling
+
+A lead adds gridlines to a tensor grid shared by the whole layout, and **it can go either way**:
+
+| file | N without leads | with | Δ |
+|---|---|---|---|
+| `examples/Klopfenstein Taper` | 774 | 653 | **−15.6 %** |
+| `examples/Patch Antenna` | 2,299 | 2,299 | 0 (no lead) |
+| `examples/PDK PCells` spiral | 1,388 | 1,706 | **+22.9 %** |
+| the same spiral at the default mesh | 23,357 | 25,120 | +7.5 % |
+
+**Where a lead pushes the mesh past the ceiling, the refusal says which part of it is not the user's
+artwork.** Every other remedy in that message is a setting or a piece of the drawn layout; a lead is
+neither, and a user measuring their part against the refusal's numbers would be measuring a structure
+that is not in their file. **Shortening it is not offered as a remedy** — it is the length that makes
+the de-embedding valid, and trading that for mesh size silently is the trade this whole area exists
+to stop. `EndRunHeights` was not touched for the same reason.
+
+### 10. M5 — acceptance, on the file as a user would write it
+
+`examples/PDK PCells` now carries `SpiralInductor/em/SpiralInductor.cem` and the two port labels the
+top layout was missing, so the one PCell workspace circuitRF ships actually demonstrates EM on a
+PCell. `circuitrf em` on it, 0–8 GHz, 51 points, nothing else edited, reading `Zs = −1/Y₂₁`:
+
+| f (GHz) | reported | now | σ_max now |
+|---|---|---|---|
+| 0 | +1.765 + j0 Ω | **+1.774 + j0 Ω** | 1.00000 |
+| 0.32 | −584.4 + j2115.6 (1052 nH) | −2.67 + j63.47 (31.6 nH) | 1.0384 ❌ |
+| 0.48 | −282.4 + j1470.3 (487 nH) | −0.95 + j47.62 (15.8 nH) | 1.0152 ❌ |
+| 2.08 | −16.5 + j386.5 (29.6 nH) | **+0.60 + j45.51 (3.48 nH)** | 0.99763 ✅ |
+| 4.16 | — | +0.78 + j77.08 (2.95 nH) | 0.99724 ✅ |
+| 8.00 | −1.2 + j221.3 (4.5 nH) | **+1.07 + j141.03 (2.81 nH)** | 0.99601 ✅ |
+
+**2–8 GHz is right**: positive R, passive at every point, 2.81–3.48 nH of coil, landing on Wheeler at
+the top of the band. That is this brief's gate and it is met.
+
+**Below ~0.8 GHz it is still wrong**, and that is brief PEEL's `1/|a₂₁|²`, not this one's — improved
+33× from the published 1052 nH at 0.32 GHz but not fixed. **It is also what stops the adaptive sweep
+converging**: the run reports *"DID NOT CONVERGE … worst |ΔS| = 0.0203 against a tolerance of 0.001,
+29 of 50 solved"*, and every one of those disagreements is in the bottom decade. The shipped `.cem`
+keeps the reported 0–8 GHz sweep anyway, because narrowing it would hide the one thing this file is
+now the acceptance fixture FOR — and the Touchstone says on its own face which rows are not an
+answer. **Whether the shipped example should instead start above 1 GHz is the owner's call**, and it
+is the only thing in this section that was decided on taste rather than on a measurement.
+
+**A `.cem` that names only Metal1 publishes a clean, smooth, perfectly passive OPEN CIRCUIT.** The
+coil's inner terminal escapes on Metal2 through two via posts, so a run whose analysis levels are
+Metal1 alone drops the underpass and the two ports are not connected at all — `|S₂₁| = 4e-4`, with
+one note among thirty saying two via shapes were ignored. Measured on this very file while writing
+it. The shipped setup lists both levels, and `PdkPCellExampleTests` gates that it does.
+
+### 11. R-pcal7-4 — a row that is not a network is named on the FILE's own face
+
+PCAL2's finding one case further on. The run has always said `NOT PASSIVE` in its notes; a `.sNp`
+carries no notes, and on this file the four rows below ~0.8 GHz are the decade a reader looks at
+first. `EmSnpProvenance.ValidityCaveats` now emits a second caveat beside the validity one:
+
+```
+! circuitRF-EM caveat: 4 of these rows are NOT A PASSIVE NETWORK and should not be used:
+  160 MHz to 640 MHz, worst sigma_max(S) = 1.0919. …Raise the sweep's lower edge, or read
+  those rows as unanswered.
+```
+
+σ_max > 1 needs no threshold argued for: a passive structure cannot do it, so the excess is the
+ANALYSIS. The note gained the same thing — the **frequencies**, not just the count, because raising
+the sweep's lower edge is not an action anyone can take from "4 of 50".
+
+**ASCII only, and that is not a style rule.** Touchstone is written in an encoding this writer
+transliterates to: the first version of that line read *"worst ?_max(S) = 1.0919"* and *"divides by
+a???"* on the file. A caveat the file cannot spell is one nobody can act on.
+
+**Dropping those points instead was considered and NOT done.** PEEL's per-point guard already exists
+and is the right shape, but it does not see this failure: `DeembedErrorFloor` reads **2.2e-2** at
+160 MHz, under PEEL's own 0.05 budget, while the realised passivity excess is 9.2e-2 and the
+inductance is 30× out. PEEL's law was calibrated on a uniform line where the de-embedded `S₁₁` must
+be 0; on a high-Q coil read as `−1/Y₂₁`, a `|ΔS|` of 0.02 lands on a matrix whose own `S₁₁` is
+0.9999 and is amplified again. **`DeembedErrorFloor` is a bound on `|ΔS|` and not on the quantity a
+user reads.** Turning σ_max into a per-point DROP would change every run in this engine and is a
+decision for the owner, not for this brief; what shipped is the sentence, in the notes and on the
+file. **The brief's other candidate — "PEEL's `2βΔℓ` conditioning gate" — does not exist and cannot
+be built as described**: PEEL §1 measured Δℓ INERT over a 30× range and re-attributed the amplifier
+to `1/|a₂₁|²`.
+
+### 12. Where the gates are, and why they are split
+
+- **Routine tier** — `tests/Engine.Tests/Mom/OwnNetFeedNeighbourhoodTests.cs`, 16 tests in **1 s**.
+  The DECISIONS: which metal is a neighbour, how long a lead is, which run is refused, what the note
+  says, that a flare is still exempt, that the ceiling refusal names a grown lead. These are what the
+  code changes actually do and what would catch a regression first.
+- **`Category=Benchmark`** — `tests/Engine.Tests/Mom/OwnNetFeedPhysicsTests.cs`, 9 tests in
+  **5 m 29 s**. The nH numbers, the bit-identity of the three clear fixtures, and the coupled-line
+  control. Each solves a DUT and its standards; per-fixture cost measured at 3.1 / 102 / 6.3 / 14.5 /
+  9.0 / 0.1 / 81.7 s for Straight / ViaHop / Bend / Splay / Coupled / Hair50 / UnevenPads.
+- `tests/Ui.Tests/Em/NonPassiveCaveatTests.cs` (25 ms) and two new cases in
+  `tests/Ui.Tests/Examples/PdkPCellExampleTests.cs`.
+
+**The fixture mesh is `CurrentModel.TransmissionLine`, and that is load-bearing rather than tidy.** A
+calibration GROUP stays on the MEASURED separation ladder by design (`SeparationPlan` declines the
+quasi-static shortcut for one), so its standard is 60° of line — 9.78 mm at 2 GHz on this stack.
+Under the per-axis rule a 10 µm conductor forces a 10 µm cell in BOTH directions, which makes that
+standard **18,224 unknowns** and refuses every grouped fixture at the dense ceiling. Telling the
+mesher the metal is a LINE puts λ along the current and the width across it, and the same standard is
+**818**.
+
+### 13. Traps and negative results, for whoever is next
+
+- **A scratch console that runs `EmSetupPersistence.LoadFromFile` → … → `PlanarConductors.Of` and
+  prints connectivity and unknown counts answers "is the mesh severed?" and "how many unknowns?" in
+  0.6 s.** Every diagnosis above was reached with it before a single full-wave solve. Build it first.
+- **A baseline is a `git worktree` at HEAD, never a `git stash`.** Every before/after number in this
+  section is the same probe binary built against both trees, so "bit-identical to twelve significant
+  figures" is a diff of two files rather than a claim.
+- **`DeembedResidual` is anti-correlated with the truth here too**, as PEEL already recorded: on the
+  reported file it reads 5.4e-10 at 160 MHz, the point that is 39× wrong, and rises through the band
+  where the answer is right.
+- **The brief's own `.cem` numbers (4,814 → 4,189 unknowns, 265 µm leads) were not reproduced
+  exactly** — this work measures 1,388 → 1,706 and 262.5 µm on a mesh of its own choosing, because
+  the reported `.cem` did not exist in the repository and had to be authored. The leads agree to one
+  scan step, and the direction of the ΔN differs, which is what the brief itself warned was "a happy
+  accident of this geometry and not a general claim".
+
 ## Why the edge mesh is unaffordable on a MMIC spiral, measured (2026-09-15)
 
 Owner, on the PDK PCells example: the default mesh on a `KIT_SPIRAL` has far too many cells, edge
