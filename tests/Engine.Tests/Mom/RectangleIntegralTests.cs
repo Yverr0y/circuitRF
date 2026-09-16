@@ -12,6 +12,7 @@
 // panel refinement toward the singular line, which is exact on every panel because the integrand is
 // analytic there.
 
+using System.Numerics;
 using CircuitRF.Engine.Mom;
 using CircuitRF.Engine.Tests.Mom.Support;
 
@@ -242,5 +243,55 @@ public class RectangleIntegralTests
 
         Assert.Equal(s * s * s * RectangleIntegrals.Radius(0.2, 1.1, -0.4, 0.9),
                      RectangleIntegrals.Radius(0.2 * s, 1.1 * s, -0.4 * s, 0.9 * s), 10);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // T1_12 — MIM-8's COMPLEX offset
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // Corner0AtComplexOffset is the analytic continuation of Corner0AtOffset, and the only thing a
+    // continuation can get wrong is a branch — so the fixture is a fan of arguments out to 45° off
+    // the real axis, where a naive evaluation of the third term jumps by πc, plus the real axis
+    // itself, where the answer is already known.
+    //
+    // NEARER THE IMAGINARY AXIS THE REFERENCE IS THE THING THAT FAILS, and that is measured rather
+    // than assumed: at c = 0.02 + 1j the integrand has a near-pole ON the real (u,v) domain, and
+    // subdividing the reference walks it toward the closed form (1.7e-1 → 6.6e-5 over 1 → 64
+    // sub-rectangles per side) while the closed form, being one evaluation, does not move. See
+    // HISTORY §MIM-8. Those offsets are therefore left out of the fixture below.
+
+    [Theory]
+    [InlineData(1.0, 0.0)]          // the real axis — reduces to Corner0AtOffset exactly
+    [InlineData(0.001, 0.0)]
+    [InlineData(1.0, 0.5)]
+    [InlineData(1.0, 1.0)]
+    [InlineData(0.05, 0.05)]
+    [InlineData(3.0, -2.0)]
+    public void T1_12_TheComplexOffset_MatchesAdaptiveQuadrature(double cr, double ci)
+    {
+        var c = new Complex(cr, ci);
+        foreach (var (a, b) in new[] { (1.0, 1.0), (4.0, 0.1) })
+        {
+            var closed = RectangleIntegrals.Corner0AtComplexOffset(a, b, c);
+            if (ci == 0)
+                Assert.Equal(RectangleIntegrals.Corner0AtOffset(a, b, cr), closed.Real, 12);
+
+            // ∫∫ du dv / √(u²+v²+c²) over [0,a]x[0,b], real and imaginary parts through the same
+            // reference the real forms use. The integrand is BOUNDED here — the peak is of width
+            // |c| — so no singular grading is needed and the reference shares no line of code with
+            // the closed form.
+            Complex Integrand(double u, double v)
+            {
+                var r = Complex.Sqrt(u * u + v * v + c * c);
+                return 1.0 / (r.Real < 0 ? -r : r);
+            }
+            var reference = new Complex(Reference((u, v) => Integrand(u, v).Real, 0, a, 0, b),
+                                        Reference((u, v) => Integrand(u, v).Imaginary, 0, a, 0, b));
+            double scale = Reference((u, v) => Integrand(u, v).Magnitude, 0, a, 0, b);
+
+            Assert.True((closed - reference).Magnitude <= 1e-9 * scale,
+                $"a={a} b={b} c={c}: closed {closed:G8} vs reference {reference:G8}, " +
+                $"|Δ|/∫|f| {(closed - reference).Magnitude / scale:E3}");
+        }
     }
 }

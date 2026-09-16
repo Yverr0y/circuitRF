@@ -8245,3 +8245,276 @@ than of a mesh.
 `Cost_TheGramIsBuiltOncePerMesh_NotPerFrequency` (a 5-point sweep, one build) is what would catch the
 one failure that would make the term measurable — rebuilding the Gram per frequency. A timing test
 would measure the machine.
+
+---
+
+# MIM-8 — the cross-level fill, at the cell/separation a real MMIC meshes at (brief-em-mim-8-cross-level-quadrature.md, 2026-09-15)
+
+MIM-3 measured the cross-level block losing four decades between cell/separation 1 and 20, stated
+the range at 5, and stopped there on its own instruction. What arrived was the deferral: the shipped
+MMIC technology's own MIM capacitor cannot be EM-simulated on it. A 1.0838 pF series capacitor
+extracted as an open with the wrong sign, and no setting reached it — the mesh pitch on that design
+is `width/MinCellsAcrossConductor`, i.e. the metal's own width, so neither frequency knob acts.
+
+Narrative and findings in `RESOLVED.md` §MIM-8. The tables are here. Everything below is a scratch
+harness in RELEASE, run alone, except where a test is named.
+
+## The milestones
+
+| # | what | outcome |
+|---|---|---|
+| 1 | Reproduce MIM-3's ladder on today's build | Done — `2.24e-7 / 3.41e-3 / 3.08e-2 / 1.11e-1 / 3.16e-1` at cell/sep 1 / 5 / 10 / 20 / 50 against HISTORY's `2.24e-7 / 3.66e-3 / 3.68e-2 / 1.46e-1 / 4.72e-1` (the small drift at the coarse rungs is the lighter reference `MimThinLayerTests` uses; MIM-3's own honesty note covers it) |
+| 2 | Cost the two treatments before choosing | Peak subtraction (option 1) — and the measurement that decided it was not the two options against each other but **which HALF of the block carries the error** |
+| 3 | Build it; the ladder out to ratio 50 | Done, and past it — the capacitance is within 1% out to cell/separation 300 |
+| 4 | The end-to-end gate | Done — the shipped-size capacitor reads **1.0891 pF against 1.0838 pF**, where it read **−0.3255 pF** |
+| 5 | Re-scope the note | `ValidatedCellOverSeparation` 5 → 200, and the note past it now says "unmeasured" rather than "wrong" |
+
+## Table 1 — WHERE the peak is, which is not where the brief guessed
+
+The brief's option 1 was to subtract "the two-parallel-rectangles potential integral at separation
+`d`" — i.e. the extracted ASYMPTOTES. That term does not exist for this pairing.
+`LayeredSpectralGreens.AsymptoticAtHeights` returns **zero coefficients for a cross-REGION pair** by
+design ("every term crosses at least one full region and decays"), and a plate pair straddling the
+capacitor dielectric is exactly that. The probe, on the shipped stack at d = 0.2 µm with 2.5 µm
+cells:
+
+| pairing | images | asymptote | shallowest image depth | as a fraction of a cell |
+|---|---|---|---|---|
+| G_q same-level (0,0) | 18 | direct 0.147, image −0.046 | 0.328 µm | **0.131** |
+| G_q cross-level (0,1) | 11 | **both zero** | 0.128 µm | **0.051** |
+| G_A^xx cross-level (0,1) | 16 | **both zero** | 0.200 µm | **0.080** |
+
+**The peak is a FITTED IMAGE, and R-fil-8 had already named the condition.**
+`PlanarKernelTerms.SmallestImageDepth` exists because "the fitted images are smooth" is conditional
+on their depths being large against a cell, and `FromDcimAtHeights` assumes it — it moves an image's
+value at ρ = 0 into the constant and leaves the whole of its ρ-dependence to the remainder, which
+the fill integrates with a handful of Gauss nodes and interpolates from a table spaced at 0.02 of a
+cell. At 0.05 of a cell neither resolves it. The remainder at ρ = 0.25 d is 1.7e9 times its value at
+ρ = 0, over a distance of a twentieth of a cell.
+
+## Table 2 — WHICH HALF of the block, which is what decided the build
+
+Z = scalar half + vector half exactly, so the vector half is a difference. Cross-level block,
+d = 0.2 µm, entry-wise against forced-high quadrature and scaled by the block's own largest entry:
+
+| cell/sep | cross total | cross SCALAR half | cross VECTOR half |
+|---|---|---|---|
+| 1 | 2.24e-7 | 2.24e-7 | 1.85e-16 |
+| 5 | 3.41e-3 | 3.41e-3 | 2.61e-11 |
+| 10 | 3.08e-2 | 3.08e-2 | 3.00e-9 |
+| 20 | 1.11e-1 | 1.11e-1 | 7.32e-8 |
+| 50 | 3.16e-1 | 3.16e-1 | 1.69e-6 |
+
+**The vector half carries none of it** — five decades down at the worst rung — although its own
+cross-level fit has an image at 0.08 of a cell and therefore the same peak. At these dimensions the
+scalar entry is larger by ~1/(ω²ε₀µ₀A_cell), which on a 2.5 µm cell at 10 GHz is ~2.6e5. So the
+treatment is built for the SCALAR block only, and the ramp-weighted moments at a complex offset that
+the vector block would need were measured to be unnecessary rather than skipped.
+
+## Table 3 — the FILL ladder, before and after
+
+`PlanarFillSettings.ShallowImageCells` = 0 is the pre-MIM-8 arithmetic and is reproduced bit for bit
+(`MimThinLayerTests.T1` pins MIM-3's own literals against it). d = 0.2 µm, four cells to a side.
+
+| cell/sep | cross before | cross after | same before | same after |
+|---|---|---|---|---|
+| 1 | 2.24e-7 | 2.24e-7 | 3.35e-6 | 3.35e-6 |
+| 5 | 3.41e-3 | **2.39e-11** | 2.87e-6 | 4.01e-6 |
+| 10 | 3.08e-2 | **2.93e-9** | 3.69e-4 | 4.52e-6 |
+| 20 | 1.11e-1 | **7.90e-8** | 8.26e-3 | 5.00e-6 |
+| 50 | 3.16e-1 | **2.08e-6** | 7.47e-2 | 5.45e-6 |
+| 100 | 5.27e-1 | **2.03e-5** | 2.09e-1 | 5.62e-6 |
+| 200 | 7.40e-1 | **1.74e-4** | 4.46e-1 | 5.83e-6 |
+| 500 | 9.56e-1 | **2.93e-3** | 9.93e-1 | 6.75e-6 |
+
+Two things worth reading off it. **MIM-3 drew its bound where the cross column reached 4.1e-3; it
+now reaches that at about 500.** And the SAME-level column is flat at ~5e-6 across the whole
+ladder — MIM-3 measured that block as flat and it is, over the range MIM-3 drew, but its own Table 2
+has it at 9.4e-2 at cell/sep 50 and reaching the coarse rungs needs both blocks treated. That is a
+correction to the brief's Must-NOT, not an overreach of it: see §MIM-8 in `RESOLVED.md`.
+
+### The threshold, chosen from the ladder rather than picked
+
+The image depth in cells is 0.64 / 0.13 / 0.064 / 0.032 / 0.013 at cell/sep 1 / 5 / 10 / 20 / 50, so
+a threshold in CELLS is the same axis read from the other end. Cross-level column by threshold:
+
+| threshold (cells) | cell/sep 1 | 5 | 10 | 20 | 50 |
+|---|---|---|---|---|---|
+| 0 (off) | 2.24e-7 | 3.41e-3 | 3.08e-2 | 1.11e-1 | 3.16e-1 |
+| 0.125 | 2.24e-7 | **3.41e-3** | 2.93e-9 | 7.90e-8 | 2.08e-6 |
+| 0.25 | 2.24e-7 | 2.39e-11 | 2.93e-9 | 7.90e-8 | 2.08e-6 |
+| 0.5 | 2.24e-7 | 2.39e-11 | 2.93e-9 | 7.90e-8 | 2.08e-6 |
+| 1.0 | **1.55e-11** | 2.39e-11 | 2.93e-9 | 7.90e-8 | 2.08e-6 |
+| 2.0 | 1.55e-11 | 2.39e-11 | 2.93e-9 | 7.90e-8 | 2.08e-6 |
+
+0.125 misses the 0.128-cell image at cell/sep 5 and that rung does not move; everything from 0.25 up
+is identical from cell/sep 5 on. **0.5** is shipped. At cell/sep 1 the image is at 0.64 cells and is
+not reached — and does not need to be, at 2.2e-7.
+
+## Table 4 — the PHYSICS ladder, and the instrument that made it cheap
+
+MIM-3 needed a de-embedded two-port for this and had to truncate the stack at the upper plate to get
+a port at all (its own finding 4: **raw S cannot carry a capacitance in this engine** — a matched
+50 Ω line reads |S₂₁| = 0.0706). This reads the capacitance off **P, the ω → 0 potential-coefficient
+matrix the fill itself builds**, which `PlanarFill.ScalarPotentialMatrix` now exposes for a
+multi-level mesh by being lifted out of `FillMultiLevel` rather than copied. Hold one plate at 1 V
+and the other at 0 V and report the charge on the second — `PlanarStaticLimitTests`' own instrument.
+There is no port in it to be wrong, and a rung costs under a second.
+
+**4a — the plate and the pitch fixed at 10 µm and 2.5 µm, only the film thickness moving.** This is
+MIM-3's Table 3b shape, and it reproduces MIM-3's de-embedded ladder rung for rung:
+
+| d (µm) | cell/sep | before | after | MIM-3's de-embedded reading |
+|---|---|---|---|---|
+| 2.00 | 1.25 | 1.153 | 1.153 | 0.89 |
+| 1.00 | 2.5 | 1.112 | 1.112 | 0.99 |
+| 0.50 | 5 | 1.072 | 1.070 | 1.10 |
+| 0.20 | 12.5 | 1.352 | **1.041** | 1.46 |
+| 0.10 | 25 | **−1.307** | **1.012** | −0.48 |
+| 0.05 | 50 | **−0.115** | **1.014** | −0.10 |
+
+**4b — the separation held at the shipped 0.2 µm and the PLATE grown**, so cell/separation is the
+only thing that moves and d never leaves the process value. This is the ladder the range is drawn
+on, because 4a's rungs past 50 reach them by shrinking d, which moves a different quantity (§Table 6):
+
+| plate (µm) | cell/sep | before | after |
+|---|---|---|---|
+| 4 | 5 | 1.101 | 1.096 |
+| 10 | 12.5 | 1.352 | 1.041 |
+| 60 | 75 | −0.046 | **1.003** |
+| 120 | 150 | −0.011 | **0.994** |
+| 240 | 300 | −0.003 | **0.996** |
+| 480 | 600 | −0.001 | 0.962 |
+| 960 | 1200 | −0.000 | 1.186 |
+
+The excess at the fine end is FRINGING and is real: a 4 µm plate at 0.2 µm has ~10% of edge field by
+Palmer's correction, and a 60 µm plate ~2%.
+
+**4c — one structure, four meshes, which is the sharpest form of it.** A 60 × 60 µm plate pair at
+0.2 µm, meshed four ways:
+
+| cells across the plate | pitch (µm) | cell/sep | before | after |
+|---|---|---|---|---|
+| 32 | 1.87 | 9.4 | 1.086 | **1.003** |
+| 16 | 3.75 | 18.75 | 4.470 | **1.003** |
+| 8 | 7.5 | 37.5 | −0.261 | **1.003** |
+| 4 | 15 | 75 | −0.046 | **1.003** |
+
+The answer stopped depending on the mesh. The `1.086` rung is worth noting on its own: it is the one
+pre-MIM-8 reading that does not look broken — a plausible 8% of fringing — and it is 8% wrong for a
+reason that has nothing to do with fringing.
+
+## Table 5 — the END-TO-END gate, on the shipped technology
+
+`tests/Ui.Tests/Em/MimCapacitorTests.cs`, on `StarterTechnologies.MmicGaAs()` through the extractor
+Simulate itself calls. The artwork is the README's own "60 µm capacitor" — 60 × 60 µm of top plate
+at 0.2 µm, on a bottom plate grown by the enclosure, with the plate's post and its Metal2 strap:
+
+| | |
+|---|---|
+| N | 452, cell 2 µm, cell/separation 10 |
+| ε₀εᵣA/d | **1.0838 pF** |
+| before | **−0.3255 pF** (ratio −0.300) |
+| after | **1.0891 pF** (ratio **1.005**) |
+
+and the user's structure, with the 3.8 nH spiral carried at its stated inductance because the spiral
+was never the part that failed:
+
+| | |
+|---|---|
+| design intent | series resonance at 2.48 GHz |
+| f₀ from the extracted C | **2.474 GHz**, peak \|S₂₁\| = 1.0000 at 2.475 GHz |
+
+0.2% of frequency, against the ±5% the brief asked for.
+
+## Table 6 — what is LEFT, named so it is not mistaken for what was fixed
+
+Shrinking d instead of growing the plate also raises cell/separation, and there the extracted
+capacitance does depart. **It is not a mesh condition.** At a fixed d it does not respond to the
+pitch at all:
+
+| d (µm) | pitch 2.5 µm | 1.25 | 0.625 | 0.312 |
+|---|---|---|---|---|
+| 0.0125 | 0.948 (cell/sep 200) | 0.948 (100) | 0.948 (50) | 0.948 (25) |
+| 0.005 | 0.819 (cell/sep 500) | 0.819 (250) | 0.819 (125) | 0.819 (62.5) |
+
+and it tracks the separation: 1.014 / 0.973 / 0.948 / 0.819 at d = 0.05 / 0.025 / 0.0125 / 0.005 µm.
+That floor sits **below the 0.05 µm MIM-3's own kernel tier was measured over**, and it was not
+diagnosed here: the oracle MIM-3 used (`SommerfeldIntegral.EvaluateInterior`) is validated to
+ρ/λ ≥ 1e-3, which at 10 GHz over GaAs is 8.35 µm, and cannot be asked about a peak 10 nm wide. The
+shipped 0.2 µm dielectric is four times above the floor. **A kernel-tier question, open, and stated
+rather than absorbed into the mesh bound.**
+
+## Table 7 — is the reference still a reference?
+
+MIM-3's honesty note said the forced-high reference stops having headroom past cell/sep 20. Asked
+again with the treatment carried by BOTH, stepping the reference a second time
+(panels 10/8, nodes 20/16/12, remainder 16/12/8):
+
+| cell/sep | default vs high | high vs higher | headroom |
+|---|---|---|---|
+| 5 | 2.39e-11 | 4.69e-13 | 51× |
+| 20 | 7.90e-8 | 2.35e-8 | 3.4× |
+| 50 | 2.08e-6 | 1.06e-6 | 2.0× |
+| 100 | 2.03e-5 | 1.14e-5 | 1.8× |
+| 200 | 1.74e-4 | 1.05e-4 | 1.7× |
+| 500 | 2.93e-3 | 1.83e-3 | 1.6× |
+
+Same conclusion, one order further out: the rungs past 20 support "small, and no longer a function of
+the ratio" and not their own third significant figure. **The range is drawn on Table 4b**, which
+needs no reference at all.
+
+## Table 8 — the COST, and what the near/far tier does and does not buy
+
+Release, a two-level line-plus-plate fixture (a routing conductor on Metal1 and a 20 µm plate pair
+over part of it), against the dense LU of the same N:
+
+| N | cross cell pairs | fill off (s) | fill on (s) | ratio | dense LU (s) | fill's share |
+|---|---|---|---|---|---|---|
+| 636 | 10,752 | 0.21 | 0.49 | 2.3× | 0.06 | 79% → 89% |
+| 2,316 | 41,472 | 0.85 | 1.85 | 2.2× | 3.0 | 22% → 38% |
+| 4,556 | 82,432 | 1.92 | 3.45 | 1.8× | 37 | 5% → 9% |
+
+(Three repeats; the ratio wanders between 1.8 and 2.4 run to run, which is the resolution this
+measurement has.)
+
+**The tier is in and every number in Tables 3 and 4 is identical with it and without it** — the two
+views are complete decompositions of one kernel, so choosing between them per cell pair is a cost
+tier and not an approximation. On this fixture it removes 98% of the CROSS-level closed-form calls
+and none of the SAME-level ones, which is where the remaining time is; the measured total did not
+move outside the noise. A tighter criterion (the pair's own ρ_min against the removed depth rather
+than the fill's `FarRatio`) would reach the same-level ones and was not built.
+
+**Nothing that works today gets slower for no reason**: where nothing is shallow the fill is
+bit-identical and costs exactly what it did.
+
+## Table 9 — what is bit-identical, which is narrower than the brief assumed
+
+The brief's Must-NOT said "a run with no cross-level overlap must come out bit-identical". The acting
+condition is not the film, it is whether the mesh resolves the pairing's images — the same
+cell-against-separation quantity MIM-3's note reports. An **airbridge** is in the regime too, with
+6 µm of air and no film anywhere. The shipped technology's own airbridge fixture, 300 × 100 µm:
+
+| pitch (µm) | cell/sep | entries moved | cross before | cross after |
+|---|---|---|---|---|
+| 30 | 5 | 12,414 / 16,384 | 8.93e-5 | **1.68e-6** |
+| 15 | 2.5 | 56,948 / 266,256 | 2.81e-6 | 2.81e-6 |
+| 7.5 | 1.25 | **0** / 4,502,884 | 6.18e-6 | 6.18e-6 |
+
+Where it acts it improves by 53×; where it acts and there is nothing to improve it changes no
+measured quantity; and below cell/separation ~1.5 it does not act at all. The gate in
+`MimCapacitorTests` is the third row's claim, on a fixture whose mesh resolves its own gap.
+
+## What changed in the code
+
+| file | change |
+|---|---|
+| `RectangleIntegrals.cs` | `Corner0AtComplexOffset` / `InverseAtComplexOffset` — `Corner0AtOffset` analytically continued to a COMPLEX offset, which is what a fitted depth is. Branch selection is the whole content: the two `asinh` arguments stay in the right half-plane by construction, and the `atan` term takes whichever of `z` and `1/z` has modulus ≤ 1 |
+| `ShallowImageCore.cs` | new — the cell-pair mean of `1/√(ρ²+b²)` at a complex depth. Outer Gauss on the fill's own graded rule, inner closed form, exactly as `ViaZIntegral.MeanAtOffset` does it at a real one |
+| `SingularExtraction.cs` | `FromDcimAtHeightsMinusShallowImages` + `ShallowImageSplit` — `FromDcimAtHeightsMinusStaticAsymptotes`' pattern, applied to the fitted images instead of the asymptotes. The two halves travel together because assembling one without the other is a different kernel, not a worse answer |
+| `PlanarKernelSet.cs` | `GetMinusShallowImages`, sharing the fit; `ValidatedCellOverSeparation` 5 → **200**, with both ladders in its doc comment |
+| `PlanarFill.cs` | `ShallowImageCells = 0.5`; `MultiLevelPairings` resolves the split and the far view per scalar pairing; the entry adds the closed form back for near pairs. `ScalarPotentialMatrix(cores, set, levels)` — `FillMultiLevel`'s own first half, LIFTED OUT rather than copied, so the capacitance ladder reads the arithmetic a solve uses |
+| `PlanarSolve.cs` | `LevelSeparationNotes` — the new ladder's numbers, and past the bound it now says **unmeasured** rather than wrong |
+| `tests/Engine.Tests/Mom/RectangleIntegralTests.cs` | `T1_12` (reduces to the real form on the real axis) and `T1_13`/`T1_14` (against adaptive quadrature; the nearly-imaginary case is where the QUADRATURE fails and refinement is what says so) |
+| `tests/Engine.Tests/Mom/MimThinLayerTests.cs` | `T1` pins both arithmetics, MIM-3's own literals on the off-rows; `T7` re-pointed to the pair of claims; `T8`/`T8b`/`T8c`/`T8d` are the capacitance ladder, including the wrong-sign one |
+| `tests/Ui.Tests/Em/MimCapacitorTests.cs` | the three `MIM8_` gates — the shipped-size capacitor, the resonance, and the fill-level bit identity |

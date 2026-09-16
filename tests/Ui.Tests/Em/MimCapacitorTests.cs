@@ -26,6 +26,7 @@
 
 using System.Numerics;
 using CircuitRF.Engine.Mom;
+using NumFlat;
 using CircuitRF.Ui.Layout.Em;
 using CircuitRF.Ui.Layout;
 using CircuitRF.Ui.Layout.PCells;
@@ -615,6 +616,191 @@ public class MimCapacitorTests(ITestOutputHelper output)
             $"|S21| with the plate via ({s21With:E3}) does not dominate the via-less broadside leak " +
             $"({s21Without:E3}). The via is the only conducting path onto the top plate — if these are " +
             "comparable, the vertical basis is carrying no current or the via never reached the mesh.");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // MIM-8 — the end-to-end gate: the capacitor a user draws returns its capacitance
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The README's own "60 µm capacitor" — 60 × 60 µm of top plate at the shipped 0.2 µm,
+    /// which is 1.0838 pF, on a bottom plate grown by the enclosure, with the plate's post and its
+    /// Metal2 strap. The strap leaves NORTHWARD across the plate edge, which is the escape
+    /// <c>KIT_MIMCAP</c> itself uses.</summary>
+    private static List<LayoutShape> SixtyMicronSeriesCapacitor() =>
+    [
+        Rect(Metal1,    0,  0, 64, 64),        // bottom plate, 2 µm of enclosure all round
+        Rect(MimMetal,  2,  2, 62, 62),        // top plate — W x L, and the plate that sets C
+        Rect(MimVia,   25, 25, 39, 39),        // the post up to Metal2
+        Rect(Metal2,   25, 25, 39, 90),        // the strap that carries the top plate away
+    ];
+
+    [Fact]
+    public void MIM8_TheShippedSizeCapacitor_ReturnsItsCapacitance_AndResonatesWithTheSpiral()
+    {
+        // THE GATE THIS BRIEF EXISTS FOR. The artwork is the shipped technology's own capacitor at
+        // the size a 1.0838 pF part is drawn at, extracted by the extractor Simulate calls and
+        // filled by the fill a solve uses.
+        //
+        // WHY THE INSTRUMENT IS ELECTROSTATIC AND NOT A DE-EMBEDDED TWO-PORT. §MIM-3 finding 4
+        // measured that a raw S reading in this engine is the PORT and not the structure — a
+        // matched 50 Ω line reads |S21| = 0.0706 — and its de-embedded instrument had to truncate
+        // the stack at the upper plate to get a port at all, which is not this technology. What the
+        // user's run got wrong is a CAPACITANCE, so the gate reads a capacitance, off the ω → 0
+        // potential-coefficient matrix the fill itself builds. There is no port in it to be wrong.
+        var r = Extract(SixtyMicronSeriesCapacitor(), 10e9);
+        Assert.True(r.Ok, r.Refusal);
+        var problem = r.Problem!;
+        Assert.Equal(["Metal1", "MIM Metal", "Metal2"], problem.Layers.Select(l => l.Name));
+
+        var (after, cell, n) = TerminalCapacitance(problem, 0.5);
+        var (before, _, _)   = TerminalCapacitance(problem, 0.0);
+
+        const double closed = 8.8541878128e-12 * 6.8 * 60e-6 * 60e-6 / 0.2e-6;   // 1.0838 pF
+        output.WriteLine($"60 µm series MIM: N = {n}, cell = {cell * 1e6:G3} µm " +
+                         $"(cell/separation {cell / 0.2e-6:G4}); C = {before * 1e12:F4} pF before, " +
+                         $"{after * 1e12:F4} pF after; ε₀εᵣA/d = {closed * 1e12:F4} pF " +
+                         $"(ratio {before / closed:F3} -> {after / closed:F3})");
+
+        // BEFORE: an OPEN, and with the wrong sign — which is what a user saw as a flat −46 dB
+        // across the band with nothing in the report to say why.
+        Assert.True(before < 0,
+            $"expected the pre-MIM-8 arithmetic to report a negative capacitance here; got " +
+            $"{before * 1e12:F4} pF.");
+
+        // AFTER: within 10% of ε₀εᵣA/d. The allowance is FRINGING plus the strap: a 60 µm plate at
+        // 0.2 µm carries about 2% of edge field by Palmer's correction, and the Metal2 strap adds a
+        // couple of fF of its own over the bottom plate. Both are real capacitance the drawn cell
+        // has, so the band is one-sided in spirit; it is written two-sided because the measured
+        // excess never reaches it.
+        Assert.InRange(after / closed, 0.90, 1.10);
+
+        // ── and the same number read out where the user was looking: in series with their 3.8 nH
+        //    spiral this is a resonance at 2.48 GHz, and they saw a flat open across the band. The
+        //    spiral is carried at its STATED inductance because the spiral was never the part that
+        //    failed, and 5% in frequency is 10% in C — the same gate, in the quantity that was
+        //    reported. |S21| of L and C in series between 50 Ω ports.
+        const double l = 3.8e-9;
+        double best = 0, atF = 0;
+        for (double f = 1.5e9; f <= 3.5e9; f += 5e6)
+        {
+            double w = 2 * Math.PI * f;
+            var zSeries = Complex.ImaginaryOne * (w * l - 1.0 / (w * after));
+            double s21 = Complex.Abs(2 * 50.0 / (2 * 50.0 + zSeries));
+            if (s21 > best) { best = s21; atF = f; }
+        }
+        output.WriteLine($"with a 3.8 nH spiral: peak |S21| = {best:F4} at {atF / 1e9:F3} GHz " +
+                         $"(design intent: ≈ 0 dB at 2.48 GHz)");
+
+        Assert.InRange(atF / 1e9, 2.48 * 0.95, 2.48 * 1.05);
+        Assert.True(best > 0.99, $"the resonance is not a through: peak |S21| = {best:F4}.");
+    }
+
+    /// <summary>
+    /// The capacitance between the series capacitor's two TERMINALS — Metal1 (the feed and the
+    /// bottom plate) against MIM Metal plus Metal2 (the top plate and its strap, one conductor
+    /// through the post).
+    ///
+    /// <para><c>PlanarStaticLimitTests</c>' own instrument, on the multi-level P: hold one terminal
+    /// at 1 V and the other at 0 V, solve for the charges, and report minus the charge that lands on
+    /// the second. A genuine entry of the physical capacitance matrix, and it needs no port, no
+    /// reference impedance and no wave.</para>
+    /// </summary>
+    private static (double C, double Cell, int N) TerminalCapacitance(PlanarProblem problem,
+                                                                      double shallowImageCells)
+    {
+        var st   = PlanarFillSettings.Default with { ShallowImageCells = shallowImageCells };
+        var mesh = SurfaceMesher.Mesh(problem,
+                        new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false)).Mesh;
+        var cores = PlanarFill.BuildCores(mesh, st);
+        var set   = new PlanarKernelSet(
+                        new LayeredSpectralGreens(problem.EffectiveStack, problem.MaxFrequencyHz),
+                        st.Order).For(cores);
+        var p = PlanarFill.ScalarPotentialMatrix(cores, set, PlanarLevels.From(problem));
+
+        int m = mesh.Cells.Count;
+        var a   = new Mat<Complex>(m, m);
+        var rhs = new Vec<Complex>(m);
+        for (int i = 0; i < m; i++)
+        {
+            rhs[i] = mesh.Cells[i].LayerIndex == 0 ? Complex.One : Complex.Zero;
+            for (int j = 0; j < m; j++) a[i, j] = p[i, j] / EmConstants.Eps0;
+        }
+        var q = a.Lu().Solve(rhs);
+
+        Complex onTop = Complex.Zero;
+        for (int i = 0; i < m; i++) if (mesh.Cells[i].LayerIndex != 0) onTop += q[i];
+        return (-onTop.Real, mesh.Cells[0].Width, mesh.Bases.Count);
+    }
+
+    [Fact]
+    public void MIM8_AnInterconnectRunWhoseMeshRESOLVESItsGap_IsFilledBitIdentically()
+    {
+        // MIM-7 gated the module-free stack on EXTRACTION — every number the solver reads. MIM-8
+        // changes what the solver DOES with them, so the claim has to be made one layer in.
+        //
+        // AND IT IS A NARROWER CLAIM THAN THE BRIEF ASSUMED, which is worth stating rather than
+        // arranging around. The brief expected "a run with no thin film is untouched". The acting
+        // condition is not the film, it is whether the mesh resolves the fitted images — cell
+        // against level separation, the same quantity MIM-3's note already reports — and an
+        // AIRBRIDGE meshed coarsely is in that regime with 6 µm of air and no film anywhere. On the
+        // 300 × 100 µm fixture at its own default mesh (30 µm cells, cell/separation 5) the
+        // treatment fires and the cross-level block improves 8.9e-5 -> 1.7e-6. Measured, and an
+        // improvement; it is simply not identity.
+        //
+        // What IS identity is a run the mesh resolves, and that is what this asserts: the same
+        // shape drawn small, where the default four-cells-across rule puts the pitch well under the
+        // 6 µm the two levels are apart.
+        var shapes = new List<LayoutShape>
+        {
+            Rect(Metal1,  0,  0, 12, 12),
+            Rect(Metal1, 20,  0, 32, 12),
+            Rect(Metal2,  4,  0, 28, 12),
+            Rect(Post,    4,  4,  8,  8),
+            Rect(Post,   22,  4, 26,  8),
+        };
+        var r = PlanarExtractor.Extract(shapes, StarterTechnologies.MmicGaAs(), Dbu, 30e9);
+        Assert.True(r.Ok, r.Refusal);
+        var problem = r.Problem!;
+
+        // Two cells across rather than four, so the fill is a sixteenth of the work — this test is
+        // about a bit pattern and not about accuracy, and a 6 µm pitch against a 6 µm gap is still
+        // inside the regime where nothing is shallow (the ladder has the treatment firing from
+        // cell/separation ≈ 2.5 up).
+        var mesh = SurfaceMesher.Mesh(problem,
+                        new PlanarMeshSettings(Auto: false, CellsPerWavelength: 6, EdgeMesh: false,
+                                               MinCellsAcrossConductor: 2)).Mesh;
+
+        static Mat<Complex> FillAt(PlanarProblem p, PlanarMesh mesh, double shallow)
+        {
+            var st    = PlanarFillSettings.Default with { ShallowImageCells = shallow };
+            var cores = PlanarFill.BuildCores(mesh, st);
+            var set   = new PlanarKernelSet(
+                            new LayeredSpectralGreens(p.EffectiveStack, p.MaxFrequencyHz), st.Order)
+                        .For(cores);
+            return PlanarFill.FillMultiLevel(cores, set, PlanarLevels.From(p),
+                                             2 * Math.PI * p.MaxFrequencyHz);
+        }
+
+        var off = FillAt(problem, mesh, 0.0);
+        var on  = FillAt(problem, mesh, PlanarFillSettings.Default.ShallowImageCells);
+
+        double cell = 0;
+        foreach (var c in mesh.Cells) cell = Math.Max(cell, Math.Max(c.Width, c.Height));
+        double separation = problem.LevelZ(1) - problem.LevelZ(0);
+
+        int differ = 0;
+        for (int i = 0; i < off.RowCount; i++)
+            for (int j = 0; j < off.ColCount; j++)
+                if (off[i, j] != on[i, j]) differ++;
+
+        output.WriteLine($"airbridge on the shipped technology: N = {mesh.Bases.Count}, " +
+                         $"cell {cell * 1e6:G3} µm over {separation * 1e6:G3} µm " +
+                         $"(cell/separation {cell / separation:G3}), " +
+                         $"{differ} of {off.RowCount * off.ColCount} entries differ");
+
+        Assert.True(cell / separation < 2.0,
+            $"this fixture is supposed to RESOLVE its own gap; cell/separation is {cell / separation:G3}.");
+        Assert.Equal(0, differ);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

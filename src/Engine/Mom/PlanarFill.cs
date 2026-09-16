@@ -280,6 +280,71 @@ public sealed record PlanarFillSettings(
     public PlanarParallelBudget? Budget { get; init; }
 
     /// <summary>
+    /// <b>MIM-8 — how shallow a fitted image has to be, MEASURED IN CELLS, before the fill stops
+    /// treating it as smooth and integrates its static part in closed form instead.</b> Zero turns
+    /// the treatment off entirely and is the pre-MIM-8 arithmetic, kept as the oracle the ladder
+    /// below is stated against.
+    ///
+    /// <para><b>The quantity is the one R-fil-8 already names.</b>
+    /// <see cref="PlanarKernelTerms.SmallestImageDepth"/> exists because "the fitted images are
+    /// smooth" is conditional on their depths being large against a cell, and
+    /// <see cref="PlanarKernelTerms.FromDcimAtHeights"/> assumes it — it moves an image's value at
+    /// ρ = 0 into the constant and leaves the whole of its ρ-dependence to a handful of Gauss nodes.
+    /// A 0.2 µm capacitor dielectric puts an image at 0.05 of a cell on the shipped MMIC mesh, and
+    /// the rule integrates straight over the peak. See <see cref="ShallowImageCore"/>.</para>
+    ///
+    /// <para><b>0.5 is where the error has already gone, not a round number.</b> On MIM-3's own plate
+    /// ladder (four cells to a side, d = 0.2 µm, entry-wise against forced-high quadrature and scaled
+    /// by the block's own largest entry), the image depth in cells is 0.64 / 0.13 / 0.064 / 0.032 /
+    /// 0.013 at cell/separation 1 / 5 / 10 / 20 / 50, and the CROSS-level block reads:</para>
+    ///
+    /// <list type="table">
+    ///   <item><term>cell/sep 1</term><description>2.2e-7 → 2.2e-7 (0.64 cells: not reached at 0.5, and already accurate)</description></item>
+    ///   <item><term>cell/sep 5</term><description>3.4e-3 → 2.4e-11</description></item>
+    ///   <item><term>cell/sep 10</term><description>3.1e-2 → 2.9e-9</description></item>
+    ///   <item><term>cell/sep 20</term><description>1.1e-1 → 7.9e-8</description></item>
+    ///   <item><term>cell/sep 50</term><description>3.2e-1 → 2.1e-6</description></item>
+    /// </list>
+    ///
+    /// <para>The SAME-level block flattens with it — 3.7e-4 / 8.3e-3 / 7.5e-2 at cell/sep 10 / 20 /
+    /// 50 becomes 4.5e-6 / 5.0e-6 / 5.5e-6 — which is why the treatment is asked of every scalar
+    /// pairing and not only of the cross-level ones. MIM-3 measured the same-level block as flat, and
+    /// it is, over the range MIM-3 drew: its own Table 2 has it turning up at cell/sep 50, and
+    /// reaching that rung needs both.</para>
+    ///
+    /// <para>0.125 is too small (it misses the 0.128-cell image at cell/sep 5 and that rung stays at
+    /// 3.4e-3); 0.25, 0.5, 1 and 2 are indistinguishable at every rung from 5 up. 0.5 is taken
+    /// because it leaves a decade of margin against the one that is too small.</para>
+    ///
+    /// <para><b>WHAT IS AND IS NOT BIT-IDENTICAL, because the obvious guess is wrong.</b> The
+    /// acting condition is not "does this run contain a thin film" — it is "does the mesh resolve
+    /// this pairing's images", which is cell against level separation, the same quantity MIM-3's
+    /// note already reports. So an AIRBRIDGE meshed coarsely is in the regime too, with 6 µm of air
+    /// and no film anywhere. Measured on the shipped technology's own airbridge fixture: at
+    /// cell/separation 1.25 and below nothing is shallow and not one entry moves; at 2.5 entries
+    /// move and the cross-level error does not (2.8e-6 either way); at 5 it fires and the
+    /// cross-level block goes from 8.9e-5 to 1.7e-6. Where it acts it improves, and where it does
+    /// nothing it is off — but "a run with no film is untouched" is NOT the claim and would not
+    /// hold.</para>
+    ///
+    /// <para><b>The scale it is measured against is the largest cell on the TWO LEVELS concerned</b>
+    /// (<c>MultiLevelPairings.Resolve</c>), which is R-zz-1's discipline and MIM-3's note's: a
+    /// mesh-wide scale would grade a plate pair on some unrelated conductor's cell.</para>
+    ///
+    /// <para><b>The cost is bounded by a near/far tier on the CELL PAIR</b>, because a peak of width
+    /// |b| is only unresolved for a pair whose own ρ range reaches it: past
+    /// <see cref="FarRatio"/> the pair takes the untreated decomposition and pays nothing. The two
+    /// views are complete decompositions of one kernel, so the choice is a cost tier and not an
+    /// approximation — every number in both ladders above is identical with it and without it.
+    /// What is left, measured in RELEASE on a two-level line-plus-plate fixture, is a fill 1.8-2.4×
+    /// on a run where something IS shallow: as a share of one frequency point against the dense
+    /// solve that follows it, 5% → 9% at N = 4,556 and 22% → 38% at N = 2,316. On that fixture the
+    /// tier removes 98% of the CROSS-level closed-form calls and none of the same-level ones, which
+    /// is where the remaining time is.</para>
+    /// </summary>
+    public double ShallowImageCells { get; init; } = 0.5;
+
+    /// <summary>
     /// <b>M5 — non-null turns the AIM accelerator on for this mesh.</b> Null is the dense path, byte
     /// for byte: <see cref="PlanarSolveContext"/> builds the full O(N²) cores, fills, factors and
     /// back-substitutes exactly as L8c/L8d wrote it, and nothing on this object is read.
@@ -2327,6 +2392,15 @@ public static class PlanarFill
         /// has no such cell pairing.</summary>
         public readonly PlanarKernelTerms?[,]      TermsQ;
         public readonly Func<double, Complex>?[,]  RemQ;
+        /// <summary>MIM-8 — the images <see cref="TermsQ"/> has had subtracted, per (layer, layer);
+        /// EMPTY where nothing was shallow, which is every pairing whose fitted images the mesh
+        /// already resolves. Never null once the pairing is resolved.</summary>
+        public readonly IReadOnlyList<ComplexImage>[,] ShallowQ;
+        /// <summary>MIM-8 — the SAME pairing with nothing subtracted, for the cell pairs whose own ρ
+        /// range never reaches the peak. Identical to <see cref="TermsQ"/> when nothing was
+        /// shallow.</summary>
+        public readonly PlanarKernelTerms?[,]      TermsQFar;
+        public readonly Func<double, Complex>?[,]  RemQFar;
         /// <summary>The horizontal vector kernel's, per (layer, layer) of same-direction rooftops.</summary>
         public readonly PlanarKernelTerms?[,]      TermsA;
         public readonly Func<double, Complex>?[,]  RemA;
@@ -2351,8 +2425,11 @@ public static class PlanarFill
 
         private MultiLevelPairings(int layers, int spans, int n, int m)
         {
-            TermsQ = new PlanarKernelTerms?[layers, layers];
-            RemQ   = new Func<double, Complex>?[layers, layers];
+            TermsQ    = new PlanarKernelTerms?[layers, layers];
+            RemQ      = new Func<double, Complex>?[layers, layers];
+            ShallowQ  = new IReadOnlyList<ComplexImage>[layers, layers];
+            TermsQFar = new PlanarKernelTerms?[layers, layers];
+            RemQFar   = new Func<double, Complex>?[layers, layers];
             TermsA = new PlanarKernelTerms?[layers, layers];
             RemA   = new Func<double, Complex>?[layers, layers];
             Zz     = new (PlanarKernelTerms, Func<double, Complex>, LayeredSpectralGreens.InteriorAsymptote)?[spans, spans];
@@ -2394,8 +2471,18 @@ public static class PlanarFill
             Array.Copy(spanIndex, r.SpanOfBasis, n);
 
             // ── the scalar block: every (layer, layer) that has a cell on both ─────────────────
+            //
+            // MIM-8 — and the LARGEST CELL on those two layers is what decides which of the fit's
+            // images are unresolved, exactly as MIM-3's note asks the cell/separation question per
+            // ADJACENT LEVEL PAIR (R-zz-1's discipline): a mesh-wide scale would grade a plate pair
+            // on some unrelated conductor's cell.
             var cellLayers = new bool[layers];
-            foreach (var c in mesh.Cells) cellLayers[c.LayerIndex] = true;
+            var layerCell  = new double[layers];
+            foreach (var c in mesh.Cells)
+            {
+                cellLayers[c.LayerIndex] = true;
+                layerCell[c.LayerIndex] = Math.Max(layerCell[c.LayerIndex], Math.Max(c.Width, c.Height));
+            }
             for (int la = 0; la < layers; la++)
             {
                 if (!cellLayers[la]) continue;
@@ -2403,10 +2490,27 @@ public static class PlanarFill
                 {
                     if (!cellLayers[lb]) continue;
                     double za = levels.Of(la), zb = levels.Of(lb);
-                    var t = set.Get(GreensKernel.ScalarPotential, za, zb).With(st.Order, cores.RhoFloorM);
-                    var f = Remainder(set.Get(GreensKernel.ScalarPotential, za, zb), cores);
-                    r.TermsQ[la, lb] = r.TermsQ[lb, la] = t;
-                    r.RemQ[la, lb]   = r.RemQ[lb, la]   = f;
+                    double shallow = st.ShallowImageCells * Math.Max(layerCell[la], layerCell[lb]);
+                    var split = set.GetMinusShallowImages(GreensKernel.ScalarPotential, za, zb, shallow);
+                    var t = split.Terms.With(st.Order, cores.RhoFloorM);
+                    var f = Remainder(split.Terms, cores);
+                    r.TermsQ[la, lb]   = r.TermsQ[lb, la]   = t;
+                    r.RemQ[la, lb]     = r.RemQ[lb, la]     = f;
+                    r.ShallowQ[la, lb] = r.ShallowQ[lb, la] = split.Removed;
+
+                    // The far view. When nothing was shallow it is the SAME object — one table, one
+                    // set of terms, and the entry loop's branch cannot then change a bit.
+                    if (split.Removed.Count == 0)
+                    {
+                        r.TermsQFar[la, lb] = r.TermsQFar[lb, la] = t;
+                        r.RemQFar[la, lb]   = r.RemQFar[lb, la]   = f;
+                    }
+                    else
+                    {
+                        var plain = set.Get(GreensKernel.ScalarPotential, za, zb);
+                        r.TermsQFar[la, lb] = r.TermsQFar[lb, la] = plain.With(st.Order, cores.RhoFloorM);
+                        r.RemQFar[la, lb]   = r.RemQFar[lb, la]   = Remainder(plain, cores);
+                    }
                 }
             }
 
@@ -2552,25 +2656,7 @@ public static class PlanarFill
         for (int a = 0; a < m; a++) cellLayer[a] = mesh.Cells[a].LayerIndex;
 
         // ── the scalar half: P over CELLS, kernel chosen per (level, level) ───────────────────
-        var p = new Mat<Complex>(m, m);
-        ForRows(st, m, a =>
-        {
-            var wa = pr.Pulses[a];
-            int la = cellLayer[a];
-            for (int b = a; b < m; b++)
-            {
-                int lb = cellLayer[b];
-                var terms = pr.TermsQ[la, lb]!;
-                var core = cores.ScalarCoreOf(a, b);
-
-                Complex v = terms.Inverse * core.Inverse + terms.Log * core.Log;
-                if (terms.ExtractsConstant) v += terms.Constant;
-                if (terms.ExtractsLinear) v += terms.Linear * core.Radius;
-                v += PairRemainder(mesh, wa, pr.Pulses[b], PlanarBasisDirection.X, pr.RemQ[la, lb]!, st);
-                p[b, a] = v;
-            }
-        });
-        MirrorLowerToUpper(st, p);
+        var p = ScalarPotentialMatrix(cores, pr, cellLayer);
 
         var z = new Mat<Complex>(n, n);
         Complex scalarScale = 1.0 / (Complex.ImaginaryOne * omega * EmConstants.Eps0);
@@ -2665,6 +2751,83 @@ public static class PlanarFill
 
         MirrorLowerToUpper(st, z);
         return z;
+    }
+
+    /// <summary>
+    /// <b>D4's <c>P</c> for a MULTI-LEVEL mesh — the area-averaged scalar-potential coefficient
+    /// matrix over cells, with the kernel chosen per (level, level).</b>
+    ///
+    /// <para>This is <see cref="FillMultiLevel"/>'s own first half, lifted out rather than copied:
+    /// the fill calls it and gets the same bits it always did, and MIM-8's capacitance ladder reads a
+    /// plate pair's capacitance off the SAME arithmetic a solve uses rather than off a second
+    /// reading of it. <see cref="ScalarPotentialMatrix(PlanarFillCores, PlanarKernelTerms)"/> is the
+    /// one-level sibling and says why P is reachable at all: it IS the electrostatic
+    /// potential-coefficient matrix in the ω → 0 limit.</para>
+    /// </summary>
+    public static Mat<Complex> ScalarPotentialMatrix(PlanarFillCores cores, PlanarKernelSet set,
+                                                     PlanarLevels levels)
+    {
+        ArgumentNullException.ThrowIfNull(cores);
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(levels);
+        RequirePairCores(cores);
+
+        var mesh = cores.Mesh;
+        int m = mesh.Cells.Count;
+        var pr = MultiLevelPairings.Resolve(cores, set, levels, cores.Settings);
+        var cellLayer = new int[m];
+        for (int a = 0; a < m; a++) cellLayer[a] = mesh.Cells[a].LayerIndex;
+        return ScalarPotentialMatrix(cores, pr, cellLayer);
+    }
+
+    private static Mat<Complex> ScalarPotentialMatrix(PlanarFillCores cores, MultiLevelPairings pr,
+                                                      int[] cellLayer)
+    {
+        var mesh = cores.Mesh;
+        var st = cores.Settings;
+        int m = mesh.Cells.Count;
+
+        var p = new Mat<Complex>(m, m);
+        ForRows(st, m, a =>
+        {
+            var wa = pr.Pulses[a];
+            int la = cellLayer[a];
+            for (int b = a; b < m; b++)
+            {
+                int lb = cellLayer[b];
+
+                // MIM-8 — a peak of width |b| is only unresolved for a cell pair whose own ρ range
+                // REACHES it. Past the fill's own far tier the nearest point of one cell is several
+                // cells from the other and the image is smooth there, so the pair takes the
+                // untreated decomposition and pays nothing. The two views are complete
+                // decompositions of ONE kernel, so choosing between them per pair is a cost tier and
+                // not an approximation — RuleFor's near/mid/far is the same idea one level down.
+                var shallow = pr.ShallowQ[la, lb];
+                bool near = shallow.Count > 0 &&
+                            SeparationRatio(mesh.Cells[a], mesh.Cells[b]) < st.FarRatio;
+
+                var terms = (near ? pr.TermsQ[la, lb] : pr.TermsQFar[la, lb])!;
+                var rem   = (near ? pr.RemQ[la, lb]   : pr.RemQFar[la, lb])!;
+                var core = cores.ScalarCoreOf(a, b);
+
+                Complex v = terms.Inverse * core.Inverse + terms.Log * core.Log;
+                if (terms.ExtractsConstant) v += terms.Constant;
+                if (terms.ExtractsLinear) v += terms.Linear * core.Radius;
+                v += PairRemainder(mesh, wa, pr.Pulses[b], PlanarBasisDirection.X, rem, st);
+
+                // The shallow images the terms above no longer carry, put back in CLOSED FORM. When
+                // nothing was shallow this loop does not run and `terms` and `rem` are the very
+                // objects L9c's expression read, so the entry is bit-identical.
+                if (near)
+                    foreach (var im in shallow)
+                        v += im.Amplitude / (4.0 * Math.PI)
+                           * ShallowImageCore.CellPairMean(mesh, a, b, im.Depth, st);
+
+                p[b, a] = v;
+            }
+        });
+        MirrorLowerToUpper(st, p);
+        return p;
     }
 
     /// <summary>The largest in-plane distance between any point of one cell and any point of the

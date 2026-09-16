@@ -365,6 +365,77 @@ public sealed class PlanarKernelTerms
     }
 
     /// <summary>
+    /// <b>MIM-8 — the same decomposition with every fitted image SHALLOWER than
+    /// <paramref name="shallowDepthM"/> stripped of its STATIC part, and the list of what was
+    /// stripped so the caller can put it back in closed form.</b>
+    ///
+    /// <para><b>This is the thin-film failure, and R-fil-8 had already named the condition.</b>
+    /// <see cref="FromDcimAtHeights"/> treats a fitted image as smooth — it moves only the image's
+    /// value AT ρ = 0 into the constant and leaves the whole of its ρ-dependence in the remainder,
+    /// which the fill integrates with a handful of Gauss nodes across a cell. That is right while the
+    /// depth is large against a cell (<see cref="PlanarKernelTerms.SmallestImageDepth"/> is reported
+    /// for exactly this reason) and wrong when it is not: a 0.2 µm capacitor dielectric puts an image
+    /// at 0.13 µm, i.e. a peak of width 0.05 CELLS on the shipped MMIC mesh, and the rule integrates
+    /// straight over it. §MIM-3 measured what that costs — four decades in the cross-level block, and
+    /// a plate capacitance with the wrong SIGN.</para>
+    ///
+    /// <para><b>The split is <see cref="FromDcimAtHeightsMinusStaticAsymptotes"/>'s, term for
+    /// term</b>: the static part <c>A/(4π√(ρ²+b²))</c> comes out, and what is left of that image is
+    /// its wave correction <c>A(e^{−jk_mR}−1)/(4πR)</c>, which is O(k) and carries no peak. The
+    /// constant loses <c>A/(4πb)</c> to match. Nothing else in the decomposition moves, so an entry
+    /// assembled from these terms PLUS the closed-form integral of the removed pieces
+    /// (<see cref="ShallowImageCore.CellPairMean"/>) is the same quantity, integrated better.</para>
+    ///
+    /// <para><b>When nothing is shallow the returned terms are the ordinary ones</b> — same
+    /// coefficients, same evaluator — so a run with no thin film in it is untouched, which is the
+    /// property <c>MimThinLayerTests</c> gates byte for byte.</para>
+    /// </summary>
+    /// <param name="shallowDepthM">The depth below which an image's peak is taken to be unresolved;
+    /// the fill derives it from the cells on the two levels concerned. Zero or negative removes
+    /// nothing.</param>
+    public static ShallowImageSplit FromDcimAtHeightsMinusShallowImages(
+        DcimModel model, double shallowDepthM,
+        PlanarExtractionOrder order = PlanarExtractionOrder.Constant, double rhoFloor = 0.0)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var full = FromDcimAtHeights(model, order, rhoFloor);
+        if (!(shallowDepthM > 0)) return new ShallowImageSplit(full, []);
+
+        List<ComplexImage>? shallow = null;
+        Complex constant = full.Constant;
+        foreach (var im in model.Images)
+        {
+            // The DEPTH as the evaluator uses it: √(b²) on the branch with positive real part, which
+            // is the same choice DcimModel.EvaluateAtHeights makes for R at ρ = 0.
+            Complex b = Complex.Sqrt(im.Depth * im.Depth);
+            if (b.Real < 0) b = -b;
+            if (b.Magnitude >= shallowDepthM) continue;
+
+            (shallow ??= []).Add(new ComplexImage(im.Amplitude, b));
+            constant -= im.Amplitude / (4.0 * Math.PI * b);
+        }
+        if (shallow is null) return new ShallowImageSplit(full, []);
+
+        var removed = shallow.ToArray();
+        Complex Reduced(double rho)
+        {
+            Complex v = model.EvaluateAtHeights(rho);
+            foreach (var im in removed)
+            {
+                Complex r = Complex.Sqrt(rho * rho + im.Depth * im.Depth);
+                if (r.Real < 0) r = -r;
+                v -= im.Amplitude / (4.0 * Math.PI * r);
+            }
+            return v;
+        }
+
+        return new ShallowImageSplit(
+            new PlanarKernelTerms(Reduced, full.Inverse, full.Log, constant, full.Linear,
+                                  order, rhoFloor, full.SmallestImageDepth),
+            removed);
+    }
+
+    /// <summary>
     /// <b>A weighted sum of decompositions — the z-quadrature, applied to the TERMS rather than to the
     /// matrix entry.</b>
     ///
@@ -635,3 +706,20 @@ public sealed class RadialRemainderTable
         return 0.5 * (a + b * t + c * (t * t) + d * (t * t * t));
     }
 }
+
+/// <summary>
+/// <b>MIM-8 — a kernel decomposition together with the shallow images taken out of it.</b>
+///
+/// <para>Two halves of one statement, which is why they travel together: <see cref="Terms"/> is what
+/// the fill's ordinary extraction-plus-quadrature assembly consumes, and <see cref="Removed"/> is
+/// what the caller owes it back in closed form. Assembling one without the other is not a worse
+/// answer, it is a different kernel — so neither is reachable on its own.</para>
+///
+/// <para><see cref="Removed"/> is empty when nothing was shallow, and <see cref="Terms"/> is then the
+/// ordinary <see cref="PlanarKernelTerms.FromDcimAtHeights"/> decomposition.</para>
+/// </summary>
+/// <param name="Terms">The decomposition with the shallow images' static parts subtracted.</param>
+/// <param name="Removed">Those images, with their depths on the positive-real-part branch — the same
+/// branch <c>DcimModel.EvaluateAtHeights</c> takes.</param>
+public readonly record struct ShallowImageSplit(
+    PlanarKernelTerms Terms, IReadOnlyList<ComplexImage> Removed);

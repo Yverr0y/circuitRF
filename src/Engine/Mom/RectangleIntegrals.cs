@@ -67,6 +67,8 @@
 // Nothing here knows about frequency, a Green's function, or a mesh. These are pure geometry, which
 // is exactly why D6's frequency-independent core is expressible at all.
 
+using System.Numerics;
+
 namespace CircuitRF.Engine.Mom;
 
 /// <summary>
@@ -109,6 +111,79 @@ public static class RectangleIntegrals
              + b * Math.Asinh(a / Hypot(b, ac))
              - ac * Math.Atan(a * b / (ac * r));
     }
+
+    /// <summary>
+    /// <b>MIM-8 — <see cref="Corner0AtOffset"/> at a COMPLEX offset:</b>
+    /// <c>∫₀^a ∫₀^b du dv / √(u²+v²+c²)</c>, with every square root taken on the branch with
+    /// POSITIVE REAL PART — the decaying branch <c>DcimModel.EvaluateAtHeights</c> already picks for
+    /// a fitted image's <c>R = √(ρ² + b²)</c>.
+    ///
+    /// <para><b>Why a complex offset is needed at all.</b> A thin film puts a DCIM image at a depth
+    /// of the order of the film thickness, and an image depth is complex in general — that is what
+    /// the method fits. The peak that image carries is what the fill's Gauss rule cannot see
+    /// (§MIM-8), so the integral of its static part has to be available in closed form for the
+    /// depth the fit actually produced, not for a real approximation of it.</para>
+    ///
+    /// <para><b>It is the analytic continuation of the real form, not a second derivation.</b> The
+    /// antiderivative is the same; the only question is branch selection, and both pieces are
+    /// arranged so that the arguments stay where the principal branch is the continuous one:</para>
+    /// <list type="bullet">
+    ///   <item>the two <c>asinh</c> arguments are <c>a/√(b²+c²)</c> and <c>b/√(a²+c²)</c>, and a
+    ///     positive real over a positive-real-part root has positive real part — the half-plane the
+    ///     principal <c>asinh</c>'s cuts (the imaginary axis outside ±i) do not enter.</item>
+    ///   <item>the third term is <c>−c·atan(ab/(cR))</c>, whose argument CAN approach the cuts at
+    ///     ±i. <c>atan(z) + atan(1/z) = π/2</c> holds wherever the argument stays off the cuts, so
+    ///     the evaluation takes whichever of <c>z</c> and <c>1/z</c> has modulus ≤ 1 — which is also
+    ///     the one with no cancellation in it, since <c>atan</c> of a small argument is that
+    ///     argument.</item>
+    /// </list>
+    ///
+    /// <para>At a real <paramref name="c"/> it reproduces <see cref="Corner0AtOffset"/>, and it is
+    /// measured against adaptive quadrature over a fan of complex offsets in
+    /// <c>RectangleIntegralTests</c> — including nearly-imaginary ones, where the integrand has a
+    /// near-pole ON the real-ρ path and it is the QUADRATURE that fails rather than this.</para>
+    /// </summary>
+    public static Complex Corner0AtComplexOffset(double a, double b, Complex c)
+    {
+        if (!(a > 0) || !(b > 0)) return Complex.Zero;
+        if (c.Imaginary == 0) return Corner0AtOffset(a, b, c.Real);
+
+        Complex c2 = c * c;
+        Complex ra = PositiveRoot(a * a + c2);
+        Complex rb = PositiveRoot(b * b + c2);
+        Complex r  = PositiveRoot(a * a + b * b + c2);
+
+        Complex z = a * b / (c * r);
+        Complex third = z.Magnitude <= 1.0
+            ? -c * Atan(z)
+            : c * (Atan(1.0 / z) - Math.PI / 2.0);
+
+        return a * Asinh(b / ra) + b * Asinh(a / rb) + third;
+    }
+
+    /// <summary>∫∫ dS′/√(u²+v²+c²) over <c>[x1,x2] x [y1,y2]</c> at a COMPLEX offset — the signed
+    /// four-corner sum of <see cref="Corner0AtComplexOffset"/>, on the same parity rule the real
+    /// forms use (the integrand is even in both u and v).</summary>
+    public static Complex InverseAtComplexOffset(double x1, double x2, double y1, double y2, Complex c)
+        => SC(x2, y2, c) - SC(x1, y2, c) - SC(x2, y1, c) + SC(x1, y1, c);
+
+    private static Complex SC(double x, double y, Complex c)
+        => x == 0 || y == 0
+            ? Complex.Zero
+            : Math.Sign(x) * Math.Sign(y) * Corner0AtComplexOffset(Math.Abs(x), Math.Abs(y), c);
+
+    /// <summary>√z on the branch with positive real part — the decaying one.</summary>
+    private static Complex PositiveRoot(Complex z)
+    {
+        var r = Complex.Sqrt(z);
+        return r.Real < 0 ? -r : r;
+    }
+
+    private static Complex Asinh(Complex z) => Complex.Log(z + Complex.Sqrt(z * z + 1.0));
+
+    private static Complex Atan(Complex z) =>
+        0.5 * Complex.ImaginaryOne * (Complex.Log(1.0 - Complex.ImaginaryOne * z)
+                                    - Complex.Log(1.0 + Complex.ImaginaryOne * z));
 
     /// <summary>∫₀^a ∫₀^b u du dv / r — the first moment along the FIRST argument's axis.</summary>
     public static double Corner0Moment(double a, double b)

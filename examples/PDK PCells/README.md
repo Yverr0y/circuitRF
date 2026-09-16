@@ -321,3 +321,19 @@ This is also the one place in the kit that turns coordinates back into a physica
 allowed to: `tech.dbu_per_micron` is handed over for exactly that — a constant the generator itself
 holds, with no other way of becoming a number. Length *parameters* are still converted by circuitRF
 and never here.
+
+### And an EM run of this cell returns that capacitance — which it did not until 2026-09-15
+
+Worth saying because the readout and the EM run are two independent statements about the same plate,
+and for a while they disagreed. A 0.2 µm dielectric between two meshed levels is a hundredth of the
+cell a 60 µm plate is meshed at, and the cross-level part of the matrix fill was integrating across a
+peak that narrow instead of resolving it: the same capacitor whose parameter list said 1.084 pF
+extracted as an OPEN, with the wrong sign, and nothing in the run report said so — the answer was
+still reciprocal and still passive. It now extracts at 1.089 pF, and in series with a 3.8 nH spiral
+it resonates where the design intends rather than reading as a break in the circuit.
+
+**What to watch, if you draw something unusual.** The condition is the CELL against the LEVEL
+SEPARATION, and the run reports it by name. It is measured out to cell/separation 200; this kit's own
+60 µm capacitor on the default mesh sits at 75, and the smaller ones further inside still. Past 200 a
+note fires and says what it means — that nothing was measured up there, not that the answer is
+known to be wrong. `src/Engine/Mom/HISTORY.md` §MIM-8 has the ladders.

@@ -4698,17 +4698,24 @@ public static class PlanarSolve
               $"components — this is a note rather than a refusal because 'unmeasured' is what it " +
               $"is, and refusing on it would be inventing a limit rather than reporting one.");
 
-        // ── MIM-3 — the CELL against the LEVEL SEPARATION. A note, never a refusal ────────────
+        // ── MIM-3 / MIM-8 — the CELL against the LEVEL SEPARATION. A note, never a refusal ───
         notes.AddRange(LevelSeparationNotes(problem, mesh, fHiHz, fmt));
 
         return (EmSuitability.Yes, notes);
     }
 
     /// <summary>
-    /// <b>MIM-3 — is any pair of conductor levels closer together than the cells that straddle
-    /// them can resolve?</b> A NOTE, never a refusal, for R-prt-13's reason: the answer is still
-    /// produced, it is still reciprocal and passive, and what is unreliable is a MAGNITUDE. A
+    /// <b>MIM-3 / MIM-8 — is any pair of conductor levels closer together than the cells that
+    /// straddle them can resolve?</b> A NOTE, never a refusal, for R-prt-13's reason: the answer is
+    /// still produced, it is still reciprocal and passive, and what is unreliable is a MAGNITUDE. A
     /// refusal would also take away the many multi-level runs where the ratio is fine.
+    ///
+    /// <para><b>MIM-8 moved the bound from 5 to 50 and changed what the note MEANS past it.</b>
+    /// Before, past the bound was a measured wrongness — 1.46× at 12.5 and the wrong sign at 25.
+    /// Now the peak is subtracted and integrated in closed form, the whole measured ladder is inside
+    /// 10%, and past 50 is simply unmeasured. The wording follows that: it reports where the ladder
+    /// stops rather than predicting what happens beyond it. See
+    /// <see cref="PlanarLevels.ValidatedCellOverSeparation"/> for both ladders.</para>
     ///
     /// <para>The quantity is asked per ADJACENT LEVEL PAIR and over the cells that actually sit on
     /// those two levels, because that is the only place the cross-level block is evaluated —
@@ -4782,24 +4789,26 @@ public static class PlanarSolve
             notes.Add(
                 $"The closest conductor levels are resolved by the mesh: cell/separation = " +
                 $"{worstRatio:G3} at {where}, inside the " +
-                $"{PlanarLevels.ValidatedCellOverSeparation} MIM-3 measured the cross-level fill " +
-                $"over (≤ 4.1e-3 against forced-high quadrature; the extracted plate capacitance " +
-                $"within 10% of ε₀εᵣA/d).");
+                $"{PlanarLevels.ValidatedCellOverSeparation} MIM-8 measured the cross-level fill " +
+                $"over (≤ 1.7e-4 against forced-high quadrature; the extracted plate capacitance " +
+                $"within 1% of ε₀εᵣA/d).");
             return notes;
         }
 
         notes.Add(
             $"CELL/SEPARATION = {worstRatio:G3} at {where}, PAST the " +
             $"{PlanarLevels.ValidatedCellOverSeparation} the cross-level fill is measured over. " +
-            $"MIM-3 measured the cross-level matrix block against forced-high quadrature at " +
-            $"2.3e-7 / 4.1e-3 / 3.9e-2 / 1.5e-1 for cell/separation of 1 / 5 / 10 / 20 — four " +
-            $"decades of it, steepest at the bottom — and the capacitance extracted from a plate " +
-            $"pair follows it: within 10% of " +
-            $"ε₀εᵣA/d up to 5, 1.46× at 12.5, and the WRONG SIGN at 25. The KERNEL is not the " +
-            $"problem (it is flat in the separation down to 0.05 µm); the quadrature is, because a " +
-            $"cross-level entry carries a peak of width {fmt(worstSep)} inside a cell of " +
-            $"{fmt(worstCell)}. Nothing downstream shows it: reciprocity and passivity hold " +
-            $"throughout. What acts on this is the CELL PITCH across the metal on those two levels. " +
+            $"MIM-8 subtracts the peak a cross-level entry carries — one of width {fmt(worstSep)} " +
+            $"inside a cell of {fmt(worstCell)} — and integrates it in closed form, which held the " +
+            $"cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 against forced-high " +
+            $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the capacitance extracted " +
+            $"from a plate pair within 1% of ε₀εᵣA/d over the whole of it — 1.003 at cell/separation " +
+            $"75 and 0.996 at 300, where before it read −0.046 and −0.003. Past " +
+            $"{PlanarLevels.ValidatedCellOverSeparation} nothing was measured, and that is all this " +
+            $"says: a coarser mesh is not known to be wrong, it is unmeasured. Nothing downstream " +
+            $"would show it either way: " +
+            $"reciprocity and passivity hold throughout. What acts on this is the CELL PITCH " +
+            $"across the metal on those two levels. " +
             "That pitch is min(λ_g/CellsPerWavelength, width/MinCellsAcrossConductor), " +
             $"and only the first term responds to the frequency knobs" +
             (double.IsFinite(cellsPerWavelengthNeeded) && cellsPerWavelengthNeeded > 200
@@ -4812,7 +4821,8 @@ public static class PlanarSolve
                   $"acts at all. ") +
             $"Coupling " +
             $"between these two levels — a thin-film capacitor's plate capacitance above all — is " +
-            $"the part of this answer to distrust; everything on a single level is unaffected.");
+            $"the part of this answer that rests on the unmeasured end; everything on a single " +
+            $"level is unaffected.");
         return notes;
     }
 

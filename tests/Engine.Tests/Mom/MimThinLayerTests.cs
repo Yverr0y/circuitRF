@@ -1,21 +1,30 @@
-// brief-em-mim-3-thin-layer-gate.md — two meshed conductor levels 0.05-0.5 um apart is a regime
-// nothing had measured, and LayerStack.CanRepresent accepts any positive thickness, so nothing
-// refused the structure either.
+// brief-em-mim-3-thin-layer-gate.md and brief-em-mim-8-cross-level-quadrature.md — two meshed
+// conductor levels 0.05-0.5 um apart is a regime nothing had measured, LayerStack.CanRepresent
+// accepts any positive thickness, and nothing refused the structure either.
 //
-// The three ladders are in src/Engine/Mom/HISTORY.md and the verdict is in RESOLVED.md. What is
-// here gates the tier that proved fragile — the CROSS-LEVEL block of the multi-level fill, whose
-// error against forced-high quadrature grows four decades between cell/separation 1 and 20
-// while the SAME-level block does not move at all.
+// The three ladders are in src/Engine/Mom/HISTORY.md and the verdicts in RESOLVED.md. What is here
+// gates the tier that proved fragile — the CROSS-LEVEL block of the multi-level fill, whose error
+// against forced-high quadrature grew four decades between cell/separation 1 and 20 while the
+// SAME-level block barely moved.
+//
+// MIM-8 FIXED IT, AND THAT IS WHY EVERY GATE BELOW IS NOW A PAIR. The peak a cross-level entry
+// carries is a FITTED IMAGE whose depth is of the order of the film thickness; MIM-8 subtracts its
+// static part and integrates that in closed form (ShallowImageCore). PlanarFillSettings'
+// ShallowImageCells = 0 is the pre-MIM-8 arithmetic, reproduced BIT FOR BIT — T1 pins both, and the
+// off-row literals are MIM-3's own, unchanged. A gate that only pinned the new numbers would leave
+// nothing to say what was fixed.
 //
 // WHY THIS SHAPE. Reciprocity holds to 1e-19 and passivity to 1e-5 the whole way up the ladder, so
 // no self-consistency check can see this: it is L8c's converged-looking-but-wrong mode, one tier
 // down in z. Only a comparison against a better quadrature can, and that comparison is expensive
 // (19 s and 74 s in a Debug test run), so it carries Category=Benchmark and the ROUTINE gate is a
-// fixed-input matrix-entry comparison against literals — P3/P4's own pattern.
+// fixed-input matrix-entry comparison against literals — P3/P4's own pattern. The one routine gate
+// that is NOT a matrix entry is T8, the capacitance, because a magnitude with the wrong sign is
+// what this cost a user and a digest cannot say so.
 //
-// WHERE THE LITERALS CAME FROM. Printed by this file's own fixtures on the tree that landed MIM-3,
-// against PlanarFillSettings.Default. They assert nothing about accuracy — that is HISTORY's job
-// and T7's — but they hold the cross-level path still, which is the thing whose silent movement
+// WHERE THE LITERALS CAME FROM. Printed by this file's own fixtures on the tree that landed each
+// brief, against PlanarFillSettings.Default. They assert nothing about accuracy — that is HISTORY's
+// job and T7's — but they hold the cross-level path still, which is the thing whose silent movement
 // would invalidate the verdict.
 
 using System.Numerics;
@@ -123,25 +132,40 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Theory]
-    // cell/separation, digest of the cross-level block, and one representative entry (row 0, last
-    // column) so a failure message says HOW it moved rather than only that a hash changed.
-    [InlineData(1.0,  "917BBCA5D70341ADB227CADC723A5B6311103FBA48C2418398921DAA1B890D76",
+    // cell/separation, ShallowImageCells, digest of the cross-level block, and one representative
+    // entry (row 0, last column) so a failure message says HOW it moved rather than only that a hash
+    // changed.
+    //
+    // THE TWO ROWS AT cell/separation 1 ARE THE BIT-IDENTITY CLAIM: the shallowest image there sits
+    // at 0.64 of a cell, outside the 0.5 the treatment acts within, so nothing is subtracted and the
+    // digest is the same one. That is the shape of the claim for every pairing whose images the mesh
+    // already resolves — not that the subtraction happens and cancels, but that it does not happen.
+    //
+    // THE ROWS AT 0 ARE MIM-3's OWN LITERALS, NOT RE-TAKEN. They are what the pre-MIM-8 tree
+    // printed, and they still come out of this one — which is the strongest available statement
+    // that ShallowImageCells = 0 is the old arithmetic rather than an approximation to it.
+    [InlineData(1.0,  0.5, "917BBCA5D70341ADB227CADC723A5B6311103FBA48C2418398921DAA1B890D76",
                 0.27535759464851667, -318.6400677788218)]
-    [InlineData(20.0, "12CB6DECE52B3234793855736C205D671717EB9AD48789A8892CA94285549081",
+    [InlineData(1.0,  0.0, "917BBCA5D70341ADB227CADC723A5B6311103FBA48C2418398921DAA1B890D76",
+                0.27535759464851667, -318.6400677788218)]
+    [InlineData(20.0, 0.5, "2907FAA12FDED8125A68C4F120C52F60DEAD7A95DB960140C17CF69E4BD4EC44",
+                0.0074591547241312185, -13.469069776385286)]
+    [InlineData(20.0, 0.0, "12CB6DECE52B3234793855736C205D671717EB9AD48789A8892CA94285549081",
                 0.007459157175535663, -13.46907400956937)]
     public void T1_TheCrossLevelBlockIsHeldStill_OnAFixedInput(
-        double cellOverD, string digest, double lastReal, double lastImag)
+        double cellOverD, double shallowCells, string digest, double lastReal, double lastImag)
     {
         var p    = Plates(0.2e-6, cellOverD);
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
         var lay  = mesh.Bases.Select(b => b.LayerIndex).ToArray();
-        var z    = Fill(mesh, p, PlanarFillSettings.Default);
+        var z    = Fill(mesh, p, PlanarFillSettings.Default with { ShallowImageCells = shallowCells });
 
         Assert.Equal(48, mesh.Bases.Count);
         Assert.Equal(32, mesh.Cells.Count);
 
         var probe = z[0, z.ColCount - 1];
-        _out.WriteLine($"cell/separation {cellOverD:G3}: [0,{z.ColCount - 1}] = {probe.Real:R} {probe.Imaginary:R}");
+        _out.WriteLine($"cell/separation {cellOverD:G3}, ShallowImageCells {shallowCells:G3}: " +
+                       $"[0,{z.ColCount - 1}] = {probe.Real:R} {probe.Imaginary:R}");
         Assert.Equal(lastReal, probe.Real,      12);
         Assert.Equal(lastImag, probe.Imaginary, 9);
         Assert.Equal(digest, DigestCross(z, lay));
@@ -155,16 +179,25 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
     public void T2_TheNoteFiresOnAnUnresolvedGapAndStaysQuietOnAnOrdinaryOne()
     {
         // The shipped MIM technology's own geometry: a 10 um plate pair 0.2 um apart meshes at
-        // 2.5 um, i.e. cell/separation = 12.5. The same artwork at ordinary interconnect spacing is
-        // 0.833 and must not be flagged — a note that fires on every multi-level run is a note
-        // nobody reads, which is exactly what CheckFeedClearance was before 2026-08-12.
-        var thin = Note(0.2e-6, 10e-6);
-        var wide = Note(3.0e-6, 10e-6);
-        _out.WriteLine("THIN: " + thin);
-        _out.WriteLine("WIDE: " + wide);
+        // 2.5 um, i.e. cell/separation = 12.5 — which since MIM-8 is INSIDE the measured range and
+        // must NOT be flagged. So must the same artwork at ordinary interconnect spacing, 0.833. A
+        // note that fires on every multi-level run is a note nobody reads, which is exactly what
+        // CheckFeedClearance was before 2026-08-12.
+        //
+        // What is past the range now is a 5 nm film — cell/separation 500 — and it is deliberately
+        // a geometry no shipped process states. That is the point: MIM-8's whole result is that the
+        // structure a user actually draws came back inside.
+        var past    = Note(0.005e-6, 10e-6);
+        var shipped = Note(0.2e-6,  10e-6);
+        var wide    = Note(3.0e-6,  10e-6);
+        _out.WriteLine("PAST:    " + past);
+        _out.WriteLine("SHIPPED: " + shipped);
+        _out.WriteLine("WIDE:    " + wide);
 
-        Assert.Contains("CELL/SEPARATION = 12.5", thin);
-        Assert.Contains("PAST", thin);
+        Assert.Contains("CELL/SEPARATION = 500", past);
+        Assert.Contains("PAST", past);
+        Assert.Contains("cell/separation = 12.5", shipped);
+        Assert.DoesNotContain("PAST", shipped);
         Assert.Contains("cell/separation = 0.833", wide);
         Assert.DoesNotContain("PAST", wide);
     }
@@ -177,7 +210,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // min(λ_g/CellsPerWavelength, width/MinCellsAcrossConductor) and only the first term
         // responds to the frequency knobs, so the note must name the pitch and must never simply
         // tell the user to lower Cells per wavelength.
-        var thin = Note(0.2e-6, 10e-6);
+        var thin = Note(0.005e-6, 10e-6);
         _out.WriteLine(thin);
 
         Assert.Contains("CELL PITCH", thin);
@@ -196,7 +229,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // for that cap to equal the pitch the mesh already has? On the shipped MIM geometry — a
         // 10 µm plate pair at 10 GHz over GaAs — λ_g is ~8.35 mm and the pitch is 2.5 µm, so the
         // answer is in the thousands and the note says so with the number in it.
-        var thin = Note(0.2e-6, 10e-6);
+        var thin = Note(0.005e-6, 10e-6);
         _out.WriteLine(thin);
 
         Assert.Contains("it would take Cells per wavelength ≥", thin);
@@ -255,7 +288,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // The note is worth nothing if the driver drops it. PlanarSolve.Run assembles it for any
         // multi-level problem — this is the wiring gate, and it is deliberately the cheap one
         // (VerticalRangeVerdict, not a solve).
-        var p = Plates(0.2e-6, 12.5);
+        var p = Plates(0.2e-6, 500);
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
         var (verdict, notes) = PlanarSolve.VerticalRangeVerdict(p, mesh, 10e9);
 
@@ -264,45 +297,155 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
-    // T7 — the ACCURACY statement the verdict rests on. Category=Benchmark: 19 s and 74 s in Debug
+    // T7 — the ACCURACY statement the verdicts rest on. Category=Benchmark: 19 s and 74 s in Debug
     // ══════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
     [Trait("Category", "Benchmark")]
-    public void T7_TheCrossLevelBlockDegradesByDecades_AndOnlyItDoes()
+    public void T7_TheCrossLevelBlockDegradedByDecades_AndTheTREATMENTFlattensIt()
     {
-        // Two claims, and the second is the load-bearing one: the cross-level block moves by
-        // decades with cell/separation, and the SAME-level block does not follow it — which is what
-        // says this is the cross-level quadrature rather than the mesh simply being coarse.
+        // MIM-3's claim and MIM-8's, in one measurement, because the second is only meaningful
+        // beside the first. Turned OFF, the cross-level block moves by decades with cell/separation
+        // and the same-level block does not follow it; turned ON, neither does.
         //
-        // IF THIS GOES RED BECAUSE THE ERROR SHRANK, that is a fix and not a regression:
+        // IF THE "OFF" HALF GOES RED BECAUSE THE ERROR SHRANK, that is a fix and not a regression:
         // PlanarLevels.ValidatedCellOverSeparation, the note in PlanarSolve.LevelSeparationNotes
-        // and MIM-3's verdict in RESOLVED.md all rest on these numbers and must be re-measured
-        // rather than this bound relaxed.
-        var fine   = Measure(0.2e-6, 1.0);
-        var coarse = Measure(0.2e-6, 20.0);
+        // and both verdicts in RESOLVED.md rest on these numbers and must be re-measured rather
+        // than these bounds relaxed.
+        var offFine   = Measure(0.2e-6, 1.0,  0.0);
+        var offCoarse = Measure(0.2e-6, 20.0, 0.0);
+        var onFine    = Measure(0.2e-6, 1.0,  0.5);
+        var onCoarse  = Measure(0.2e-6, 20.0, 0.5);
 
-        Assert.True(fine.Cross < 1e-5,
-            $"cross-level at cell/separation = 1: {fine.Cross:E2} (HISTORY's ladder: 2.2e-7).");
-        Assert.True(coarse.Cross > 1e-2,
-            $"cross-level at cell/separation = 20: {coarse.Cross:E2} (HISTORY's ladder: 1.5e-1).");
-        Assert.True(coarse.Cross > 1e3 * fine.Cross,
-            $"{fine.Cross:E2} at 1 vs {coarse.Cross:E2} at 20.");
-        Assert.True(coarse.Same < 0.1 * coarse.Cross,
-            $"the SAME-level block must not follow it: same {coarse.Same:E2}, cross {coarse.Cross:E2}.");
+        // ── MIM-3, unchanged ──────────────────────────────────────────────────────────────────
+        Assert.True(offFine.Cross < 1e-5,
+            $"cross-level at cell/separation = 1: {offFine.Cross:E2} (HISTORY's ladder: 2.2e-7).");
+        Assert.True(offCoarse.Cross > 1e-2,
+            $"cross-level at cell/separation = 20: {offCoarse.Cross:E2} (HISTORY's ladder: 1.5e-1).");
+        Assert.True(offCoarse.Cross > 1e3 * offFine.Cross,
+            $"{offFine.Cross:E2} at 1 vs {offCoarse.Cross:E2} at 20.");
+
+        // ── MIM-8: the coarse rung is now four decades better, and it is no longer the rung that
+        //    decides the answer. The fine rung is untouched, because nothing there is shallow.
+        Assert.True(onCoarse.Cross < 1e-5,
+            $"cross-level at cell/separation = 20 with the treatment on: {onCoarse.Cross:E2} " +
+            $"(MIM-8's ladder: 7.9e-8).");
+        Assert.True(onCoarse.Cross < 1e-3 * offCoarse.Cross,
+            $"the treatment bought less than three decades at cell/separation 20: " +
+            $"{offCoarse.Cross:E2} -> {onCoarse.Cross:E2}.");
+        Assert.Equal(offFine.Cross, onFine.Cross, 15);
+
+        // ── and the SAME-level block comes with it. MIM-3 measured that block as flat and it is,
+        //    over the range MIM-3 drew; its own Table 2 has it turning up at the coarse end, and
+        //    that is why the treatment is asked of every scalar pairing rather than only the
+        //    cross-level ones.
+        Assert.True(onCoarse.Same < 0.1 * offCoarse.Same,
+            $"same-level at cell/separation = 20: {offCoarse.Same:E2} -> {onCoarse.Same:E2} " +
+            $"(MIM-8's ladder: 8.3e-3 -> 5.0e-6).");
     }
 
-    private (double Same, double Cross, int N) Measure(double d, double cellOverD)
+    private (double Same, double Cross, int N) Measure(double d, double cellOverD, double shallowCells)
     {
         var p    = Plates(d, cellOverD);
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
         var lay  = mesh.Bases.Select(b => b.LayerIndex).ToArray();
-        var lo   = Fill(mesh, p, PlanarFillSettings.Default);
-        var hi   = Fill(mesh, p, Reference);
+        var lo   = Fill(mesh, p, PlanarFillSettings.Default with { ShallowImageCells = shallowCells });
+        var hi   = Fill(mesh, p, Reference with { ShallowImageCells = shallowCells });
         var r    = (Block(lo, hi, lay, false), Block(lo, hi, lay, true), mesh.Bases.Count);
-        _out.WriteLine($"d = {d * 1e6:G3} um, cell/separation = {cellOverD:G3}, N = {r.Item3}: " +
+        _out.WriteLine($"d = {d * 1e6:G3} um, cell/separation = {cellOverD:G3}, " +
+                       $"ShallowImageCells = {shallowCells:G3}, N = {r.Item3}: " +
                        $"same-level {r.Item1:E2}, cross-level {r.Item2:E2}");
         return r;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // T8 — MIM-8's own gate: the PLATE CAPACITANCE
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // The matrix gates above are comparisons against a better quadrature, which is the right
+    // instrument for "is the fill converged" and the wrong one for "is the answer right". This is
+    // the second ladder, and it is the one the range is drawn on: a plate pair's capacitance
+    // against ε₀εᵣA/d, which is an oracle rather than a refinement.
+    //
+    // It reads P — the ω → 0 potential-coefficient matrix — off PlanarFill's own multi-level
+    // builder, so it is the arithmetic a solve uses and not a second copy of it, and it is the
+    // instrument PlanarStaticLimitTests already uses: hold one plate at 1 V, the other at 0 V, and
+    // report the charge that appears on the second. MIM-3 needed a whole de-embedded two-port to
+    // ask this and had to truncate the stack to get a port at all (§MIM-3 finding 4: raw S cannot
+    // carry a capacitance in this engine). Nothing here has a port in it.
+
+    [Theory]
+    // ONE STRUCTURE, THREE MESHES — the sharpest form of the statement, and the only capacitance
+    // ladder that needs to be a test. A 60 x 60 µm plate pair at the shipped 0.2 µm: the README's
+    // own "60 µm capacitor", 1.084 pF of it. The answer used to depend on the MESH, swinging from
+    // 4.470 through −0.261 to −0.046 of the closed form; it now reads 1.003 at every one, which is
+    // the property the constant is about. A negative capacitance is what the user saw as an open,
+    // so the wrong SIGN is asserted here rather than in a test of its own.
+    //
+    // HISTORY §MIM-8 Table 4 carries the rest: the d-varying ladder in MIM-3's Table 3b shape, the
+    // fourth mesh (32 cells across, 26 s, and the one pre-MIM-8 reading that does not LOOK broken at
+    // 1.086), and the rungs past cell/separation 75. Cells across the plate, cell/separation,
+    // before, after.
+    [InlineData(16,  18.75,   4.470, 1.003)]
+    [InlineData( 8,  37.5,   -0.261, 1.003)]
+    [InlineData( 4,  75.0,   -0.046, 1.003)]
+    public void T8_TheSameCapacitorOnThreeMeshes_NowGivesOneAnswer(
+        int across, double cellOverSeparation, double before, double after)
+        => OneCapacitorOneMesh(across, cellOverSeparation, before, after);
+
+    private void OneCapacitorOneMesh(int across, double cellOverSeparation, double before, double after)
+    {
+        var mesh = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false,
+                                          EdgeCells: 3, MinCellsAcrossConductor: across);
+        var (ratioOff, cell) = PlateCapacitanceRatio(0.2e-6, 0.0, 60e-6, mesh);
+        var (ratioOn,  _)    = PlateCapacitanceRatio(0.2e-6, 0.5, 60e-6, mesh);
+        _out.WriteLine($"{across} cells across a 60 µm plate: pitch {cell * 1e6:G3} µm, " +
+                       $"cell/separation {cell / 0.2e-6:G4}, C/(ε₀εᵣA/d) = {ratioOff:F3} off, " +
+                       $"{ratioOn:F3} on");
+
+        Assert.Equal(cellOverSeparation, cell / 0.2e-6, 3);
+        Assert.Equal(before, ratioOff, 2);
+        Assert.Equal(after,  ratioOn,  2);
+        Assert.True(Math.Abs(ratioOn - 1.0) <= 0.10,
+            $"cell/separation {cell / 0.2e-6:G4}: C/(ε₀εᵣA/d) = {ratioOn:F3}, outside 10%.");
+    }
+
+    /// <summary>The mutual capacitance of the two plates over ε₀εᵣA/d, and the cell pitch it was
+    /// measured at. PLATE AND PITCH FIXED, so the ladder's axis is the film thickness.</summary>
+    private static (double Ratio, double Cell) PlateCapacitanceRatio(
+        double d, double shallowCells, double w = 10e-6, PlanarMeshSettings? meshSettings = null)
+    {
+        const double epsR = 6.80;
+        var p = new PlanarProblem(
+            [
+                new PlanarConductorLayer("bottom plate", [Square(w)], 4.1e7, 0.25e-6, Zlow),
+                new PlanarConductorLayer("top plate",    [Square(w)], 4.1e7, 0.25e-6, Zlow + d),
+            ],
+            GroundedSlab.GaAsStarter, 10e9, null, MimStack(d), null);
+
+        var st    = PlanarFillSettings.Default with { ShallowImageCells = shallowCells };
+        var mesh  = SurfaceMesher.Mesh(p, meshSettings ?? Uniform).Mesh;
+        var cores = PlanarFill.BuildCores(mesh, st);
+        var set   = new PlanarKernelSet(new LayeredSpectralGreens(p.EffectiveStack, p.MaxFrequencyHz),
+                                        st.Order).For(cores);
+        var pm    = PlanarFill.ScalarPotentialMatrix(cores, set, PlanarLevels.From(p));
+
+        // φ_a = (1/ε₀)·Σ_b P[a,b]·Q_b — bottom plate at 1 V, top at 0 V, and the mutual capacitance
+        // is minus the charge that lands on the top one.
+        int m = mesh.Cells.Count;
+        var a   = new Mat<Complex>(m, m);
+        var rhs = new Vec<Complex>(m);
+        for (int i = 0; i < m; i++)
+        {
+            rhs[i] = mesh.Cells[i].LayerIndex == 0 ? Complex.One : Complex.Zero;
+            for (int j = 0; j < m; j++) a[i, j] = pm[i, j] / EmConstants.Eps0;
+        }
+        var q = a.Lu().Solve(rhs);
+
+        Complex onTop = Complex.Zero;
+        for (int i = 0; i < m; i++) if (mesh.Cells[i].LayerIndex != 0) onTop += q[i];
+        double closed = EmConstants.Eps0 * epsR * w * w / d;
+        return (-onTop.Real / closed, mesh.Cells[0].Width);
     }
 
     private static string Note(double d, double plate)

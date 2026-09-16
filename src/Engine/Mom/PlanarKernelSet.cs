@@ -103,45 +103,74 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     public const double MaxElectricalLength = 0.30;
 
     /// <summary>
-    /// <b>MIM-3 — how large a CELL may be against the SEPARATION between two conductor levels
-    /// before the cross-level block stops being the answer it looks like. A NOTE, never a
+    /// <b>MIM-3 / MIM-8 — how large a CELL may be against the SEPARATION between two conductor
+    /// levels before the cross-level block stops being the answer it looks like. A NOTE, never a
     /// refusal.</b>
     ///
-    /// <para>This is a property of the QUADRATURE, not of the kernel, and the two tiers were
-    /// separated before either was believed. The kernel is fine: at height pairs straddling a
-    /// 0.05-3 um capacitor dielectric, <see cref="Dcim.FitAtHeights"/> against direct Sommerfeld
-    /// integration is <b>flat in the separation</b> — worst 4.2e-3 of the free-space kernel at
-    /// 0.05 um and 6.4e-3 at 3 um, i.e. the interconnect-scale spacing L9c already measured. There
-    /// is no thin-layer kernel failure to find.</para>
+    /// <para><b>It was 5, and MIM-8 measured it at 200.</b> The constant is a measurement's name, so
+    /// it moved because the measurement moved and not the other way round: the peak a cross-level
+    /// entry carries is a FITTED IMAGE whose depth is of the order of the film thickness, MIM-8
+    /// subtracts its static part and integrates that in closed form
+    /// (<see cref="ShallowImageCore"/>, <c>PlanarFillSettings.ShallowImageCells</c>), and the two
+    /// ladders MIM-3 drew 5 from were re-run on MIM-3's own fixtures.</para>
     ///
-    /// <para>The FILL is where it goes. On two coincident plates straddling the dielectric,
-    /// entry-wise against the same matrix at forced-high quadrature, scaled by the block's own
-    /// largest entry — the SAME-level block stays put and only the CROSS-level block moves:</para>
+    /// <para>The kernel was never the problem and still is not: at height pairs straddling a
+    /// 0.05-3 µm capacitor dielectric, <see cref="Dcim.FitAtHeights"/> against direct Sommerfeld
+    /// integration is <b>flat in the separation</b> — worst 4.2e-3 of the free-space kernel at
+    /// 0.05 µm and 6.4e-3 at 3 µm.</para>
+    ///
+    /// <para><b>Ladder 1 — the cross-level matrix block</b> against forced-high quadrature, scaled by
+    /// the block's own largest entry, on two coincident plates four cells to a side at d = 0.2 µm.
+    /// Before MIM-8, then after:</para>
     ///
     /// <list type="table">
-    ///   <item><term>cell/d = 1</term><description>2.3e-7</description></item>
-    ///   <item><term>cell/d = 2</term><description>9.6e-6</description></item>
-    ///   <item><term>cell/d = 5</term><description>4.1e-3</description></item>
-    ///   <item><term>cell/d = 10</term><description>4.1e-2</description></item>
-    ///   <item><term>cell/d = 20</term><description>1.7e-1</description></item>
+    ///   <item><term>cell/sep 5</term><description>3.4e-3 → 2.4e-11</description></item>
+    ///   <item><term>cell/sep 20</term><description>1.1e-1 → 7.9e-8</description></item>
+    ///   <item><term>cell/sep 50</term><description>3.2e-1 → 2.1e-6</description></item>
+    ///   <item><term>cell/sep 200</term><description>7.4e-1 → 1.7e-4</description></item>
+    ///   <item><term>cell/sep 500</term><description>9.6e-1 → 2.9e-3</description></item>
     /// </list>
     ///
-    /// <para>Four decades between cell/d = 1 and 20 — steepest at the bottom, flattening as it
-    /// saturates — and §L8c's own failure mode: reciprocity holds to 1e-19 and passivity to 1e-5
-    /// the whole way up, so nothing downstream looks wrong. The
-    /// mechanism is the recorded one (§3.5): a cross-level entry "has no 1/rho", but at
-    /// d &lt;&lt; cell the kernel has a peak of width d inside a cell of width h, and a rule that
-    /// treats the pair as smooth integrates straight over it.</para>
+    /// <para>MIM-3 drew its bound where this reached 4.1e-3. It now reaches 4.1e-3 at about 500.</para>
     ///
-    /// <para><b>What it costs in the answer</b>, on a de-embedded 10 x 10 um shunt plate pair
-    /// against eps0*epsr*A/d, with the same structure minus its lower plate subtracted as the
-    /// baseline: 0.89 / 0.99 / 1.10 at cell/d = 1.25 / 2.5 / 5, then <b>1.46 at 12.5 and the wrong
-    /// SIGN at 25 and 50</b>. 5 is where the two ladders agree, so 5 is the number.</para>
+    /// <para><b>Ladder 2 — what it costs in an answer</b>: the capacitance of a plate pair read off
+    /// the ω → 0 potential-coefficient matrix the fill itself builds, against ε₀εᵣA/d, <b>with the
+    /// separation held at the shipped process value of 0.2 µm and the PLATE grown</b> — so
+    /// cell/separation is the only thing that moves. Before, then after:</para>
     ///
-    /// <para>Kernel A on the same cross-section reproduces the closed form to 1.007-1.16 over the
-    /// whole ladder and is mesh-converged to five digits, so the closed form is not in doubt.</para>
+    /// <list type="table">
+    ///   <item><term>cell/sep 5</term><description>1.101 → 1.096 (a 4 µm plate: the excess is fringing, and real)</description></item>
+    ///   <item><term>cell/sep 12.5</term><description>1.352 → 1.041</description></item>
+    ///   <item><term>cell/sep 75</term><description>−0.046 → 1.003</description></item>
+    ///   <item><term>cell/sep 150</term><description>−0.011 → 0.994</description></item>
+    ///   <item><term>cell/sep 300</term><description>−0.003 → 0.996</description></item>
+    ///   <item><term>cell/sep 600</term><description>−0.001 → 0.962</description></item>
+    /// </list>
+    ///
+    /// <para><b>And the sharpest form of it: ONE structure, FOUR meshes.</b> A 60 × 60 µm plate pair
+    /// at 0.2 µm, meshed at 1.87 / 3.75 / 7.5 / 15 µm — cell/separation 9.4 through 75 — reads
+    /// 1.086 / 4.470 / −0.261 / −0.046 before and <b>1.003 at every one of them</b> after. The
+    /// answer stopped depending on the mesh, which is what the constant is about.</para>
+    ///
+    /// <para><b>200 is where both ladders are measured and both hold</b>, MIM-3's own rule for
+    /// drawing it. Past that they part company and the evidence gets confounded: ladder 2's 600 and
+    /// 1200 rungs need a 480 µm and a 960 µm plate, which is no longer an electrically small
+    /// structure for a static instrument to be asking about, and ladder 1's own forced-high
+    /// reference has only 1.6-2.0× of headroom from cell/sep 50 out (51× at 5, 3.4× at 20) — so
+    /// those rungs support "small, and no longer a function of the ratio" and not their own third
+    /// significant figure. The shipped MMIC technology's 60 µm capacitor meshes at cell/separation
+    /// 75, well inside.</para>
+    ///
+    /// <para><b>A separate limit, named so it is not mistaken for this one.</b> Shrinking d instead
+    /// of growing the plate also raises cell/separation, and there the extracted capacitance does
+    /// depart — 1.014 / 0.973 / 0.948 / 0.819 at d = 0.05 / 0.025 / 0.0125 / 0.005 µm. That is NOT a
+    /// mesh condition: at a fixed d = 0.0125 µm it reads 0.948 at every pitch from 2.5 µm down to
+    /// 0.31 µm, cell/separation 200 through 25. It tracks the SEPARATION, it starts below the
+    /// 0.05 µm MIM-3's kernel tier was measured over, and it is a kernel-tier question MIM-8 did not
+    /// open — the oracle MIM-3 used is itself validated only to ρ/λ ≥ 1e-3 and cannot be asked at
+    /// ρ ~ 10 nm. The shipped 0.2 µm dielectric is four times above that floor.</para>
     /// </summary>
-    public const double ValidatedCellOverSeparation = 5.0;
+    public const double ValidatedCellOverSeparation = 200.0;
 
     /// <summary>
     /// The refusal, and it is now earned on ONE quantity rather than two.
@@ -271,6 +300,7 @@ public sealed class PlanarKernelSet
     private readonly FitCache              _fits;
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _terms = new();
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _reduced = new();
+    private readonly Dictionary<(GreensKernel, double, double, double), ShallowImageSplit> _shallow = new();
 
     public LayerStack Stack       => _greens.Stack;
     public double     FrequencyHz => _greens.FrequencyHz;
@@ -341,6 +371,37 @@ public sealed class PlanarKernelSet
             Model(kernel, zA, zB), _order, _rhoFloor);
         lock (_reduced) _reduced[key] = terms;
         return terms;
+    }
+
+    /// <summary>
+    /// <b>MIM-8's view of the same fit: the decomposition with every image SHALLOWER than
+    /// <paramref name="shallowDepthM"/> stripped of its static part, together with the images that
+    /// were stripped</b>
+    /// (<see cref="PlanarKernelTerms.FromDcimAtHeightsMinusShallowImages"/>).
+    ///
+    /// <para>Shares the fit with <see cref="Get"/> and <see cref="GetMinusStaticAsymptotes"/>, so a
+    /// height pairing asked for in more than one view still costs one <see cref="Dcim.FitAtHeights"/>.
+    /// The threshold is part of the cache key because it is derived from the MESH — two meshes over
+    /// one stack can disagree about which images are shallow, and they are not the same
+    /// decomposition.</para>
+    /// </summary>
+    public ShallowImageSplit GetMinusShallowImages(GreensKernel kernel, double zA, double zB,
+                                                   double shallowDepthM)
+    {
+        var k = Key(kernel, zA, zB);
+        var key = (k.Kernel, k.Lo, k.Hi, shallowDepthM);
+        lock (_shallow)
+            if (_shallow.TryGetValue(key, out var hit)) return hit;
+
+        var split = PlanarKernelTerms.FromDcimAtHeightsMinusShallowImages(
+            Model(kernel, zA, zB), shallowDepthM, _order, _rhoFloor);
+
+        // Nothing shallow ⇒ hand back the SHARED ordinary terms rather than an equal copy, so a run
+        // with no thin film in it reaches the fill with the very object it reached it with before.
+        if (split.Removed.Count == 0) split = new ShallowImageSplit(Get(kernel, zA, zB), []);
+
+        lock (_shallow) _shallow[key] = split;
+        return split;
     }
 
     /// <summary>
