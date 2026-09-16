@@ -1223,7 +1223,13 @@ public sealed class PlanarSolveResult
     public required int                                 UnknownCount  { get; init; }
     public required int                                 StandardCount { get; init; }
     public required double                              CoreBuildMs   { get; init; }
-    public required IReadOnlyList<string>               Notes         { get; init; }
+    /// <summary>EM-SEV R-emsev-1: the sweep's own findings, each carrying whether it changed what
+    /// was solved. Stored; <see cref="Notes"/> is a view of it.</summary>
+    public required IReadOnlyList<EmFinding>            Findings      { get; init; }
+
+    /// <summary>Every finding's text, class discarded — the pre-EM-SEV spelling, DERIVED so the two
+    /// cannot drift.</summary>
+    public IReadOnlyList<string>                        Notes => EmFindings.Texts(Findings);
 
     /// <summary>
     /// L8e/D5 — the DUT's own basis currents for ONE driven port at ONE frequency, kept so the
@@ -1769,7 +1775,7 @@ public static class PlanarSolve
 
         var st    = settings ?? PlanarSolveSettings.Default;
         var fmt   = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
-        var notes = new List<string>();
+        var notes = new List<EmFinding>();
 
         // Ascending, because both branch resolutions are continuations (PlanarPortCalibrator).
         var freqs = freqsHz.ToArray();
@@ -1889,7 +1895,7 @@ public static class PlanarSolve
             // and the ports already resolved, so there is an exact answer here and no reason to
             // refuse it.
             var only = PlanarDcSolve.Solve(problem, mesh, ports, leads);
-            notes.AddRange(only.Notes);
+            notes.AddRange(EmFindings.AsNotes(only.Notes));
             var onlyPoints = new List<PlanarFrequencyPoint>(1 + subFloor.Length);
             if (wantDc) onlyPoints.Add(DcPoint(only));
             for (int i = 0; i < subFloor.Length; i++)
@@ -1904,7 +1910,7 @@ public static class PlanarSolve
                 UnknownCount  = mesh.Bases.Count,
                 StandardCount = 0,
                 CoreBuildMs   = 0,
-                Notes         = notes,
+                Findings      = notes,
                 SolvedPointCount = onlyPoints.Count,
             };
         }
@@ -4160,7 +4166,7 @@ public static class PlanarSolve
         if (wantDc || subFloor.Length > 0)
         {
             var dc = PlanarDcSolve.Solve(problem, mesh, ports, leads);
-            notes.AddRange(dc.Notes);
+            notes.AddRange(EmFindings.AsNotes(dc.Notes));
             for (int i = subFloor.Length - 1; i >= 0; i--)
                 points.Insert(0, ConductionPoint(subFloor[i],
                                                  dc, i == 0 && !wantDc ? dc.ElapsedMs : 0));
@@ -4176,7 +4182,7 @@ public static class PlanarSolve
             UnknownCount  = mesh.Bases.Count,
             StandardCount = standards,
             CoreBuildMs   = coreBuildMs,
-            Notes         = notes,
+            Findings      = notes,
             NonPassivePoints = nonPassive,
             FeedClearances = clearances,
             CapturedCurrents    = captured,
@@ -4604,11 +4610,11 @@ public static class PlanarSolve
     /// calls it rather than repeating it. Public for the same reason <c>PlanarKernel.CanSolve</c> is:
     /// a pre-flight verdict is worth having before committing to a sweep.</para>
     /// </summary>
-    public static (EmSuitability Verdict, List<string> Notes) VerticalRangeVerdict(
+    public static (EmSuitability Verdict, List<EmFinding> Notes) VerticalRangeVerdict(
         PlanarProblem problem, PlanarMesh mesh, double fHiHz, PlanarFillSettings? fill = null,
         SurfaceMesher.PlanarLengthFormat? lengthFormat = null)
     {
-        var notes  = new List<string>();
+        var notes  = new List<EmFinding>();
         double lam = EmConstants.C0 / fHiHz;
         var    fmt = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
 
@@ -4736,13 +4742,13 @@ public static class PlanarSolve
     /// runs to thousands, and quoting it is what lets the note say the frequency knobs do not act
     /// here without asserting anything it has not computed.</para></para>
     /// </summary>
-    public static List<string> LevelSeparationNotes(
+    public static List<EmFinding> LevelSeparationNotes(
         PlanarProblem problem, PlanarMesh mesh, double fHiHz,
         SurfaceMesher.PlanarLengthFormat? lengthFormat = null)
     {
         ArgumentNullException.ThrowIfNull(problem);
         ArgumentNullException.ThrowIfNull(mesh);
-        var notes = new List<string>();
+        var notes = new List<EmFinding>();
         var fmt   = lengthFormat ?? SurfaceMesher.DefaultLengthFormat;
         var levels = PlanarLevels.From(problem);
         if (levels.Z.Count < 2) return notes;
@@ -4795,7 +4801,16 @@ public static class PlanarSolve
             return notes;
         }
 
-        notes.Add(
+        // EM-SEV R-emsev-4 — a WARNING, and the capitals this sentence already carried were the
+        // author reaching for a severity the type system did not have. The brief also asked for a
+        // REFUSAL past the wrong-sign rung, CONDITIONAL on MIM-8 being declined; MIM-8 landed, the
+        // peak is subtracted in closed form, and the ladder now holds to cell/separation 200 with
+        // nothing measured beyond it. There is no wrong-sign rung left to refuse on, and refusing on
+        // "unmeasured" would be inventing a limit rather than reporting one (R-prt-13). So the
+        // warning is the whole of it, and it says what it means: past the bound the dominant
+        // cross-level coupling — a thin film's plate capacitance above all — is the part of this
+        // answer nothing has checked.
+        notes.Add(EmFinding.Warn(
             $"CELL/SEPARATION = {worstRatio:G3} at {where}, PAST the " +
             $"{PlanarLevels.ValidatedCellOverSeparation} the cross-level fill is measured over. " +
             $"MIM-8 subtracts the peak a cross-level entry carries — one of width {fmt(worstSep)} " +
@@ -4822,7 +4837,7 @@ public static class PlanarSolve
             $"Coupling " +
             $"between these two levels — a thin-film capacitor's plate capacitance above all — is " +
             $"the part of this answer that rests on the unmeasured end; everything on a single " +
-            $"level is unaffected.");
+            $"level is unaffected."));
         return notes;
     }
 

@@ -7897,9 +7897,15 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // which kernel ran and why, the mesh's own sentences, RLGC, ports, how many shapes came from
         // instances — is the run explaining itself, not a problem: Info. A channel that says
         // "warning" about everything teaches people to ignore it, which costs the ones that matter.
-        foreach (var n in result.Notes ?? [])    Messages.Info(n);
-        foreach (var w in result.Warnings)       Messages.Warning(w);
+        //
+        // EM-SEV R-emsev-1 — and WORST FIRST, which grouping alone does not give. A run of this
+        // shape posts of order thirty-five rows; the three that said half the user's circuit had
+        // been removed from the solve were correct, well worded, and in the middle of them. The
+        // panel groups by icon and the reader scrolls from the top, so the order is what decides
+        // whether they are seen.
         foreach (var e in result.Errors ?? [])   Messages.Error(e);
+        foreach (var w in result.Warnings)       Messages.Warning(w);
+        foreach (var n in result.Notes ?? [])    Messages.Info(n);
 
         if (result.Status == EmRunStatus.Cancelled)
         {

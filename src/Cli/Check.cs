@@ -10,6 +10,7 @@ using CircuitRF.Design.Layout.Em;
 using CircuitRF.Design.Schematic;
 using CircuitRF.Design.Workspace;
 using CircuitRF.Diagnostics;
+using CircuitRF.Engine.Mom;
 using RfCore;
 using RfCore.Data;
 using RfCore.Export;
@@ -543,10 +544,41 @@ internal static class Check
         foreach (var d in resolution.Diagnostics) f.Add(CliDiagnostics.CheckResolverNote(path, d));
 
         if (resolution.Source is null)
+        {
             f.Add(CliDiagnostics.CheckEmUnresolved(path,
                 resolution.Diagnostics.Count > 0
                     ? "its layout did not resolve, so there is no geometry to analyse."
                     : "its layout reference resolves to nothing."));
+            return;
+        }
+
+        // ── EM-SEV R-emsev-5 — RUN THE EXTRACTION AND THE MESH, AND NOTHING ELSE ─────────────────
+        //
+        // Until this, `check` on a `.cem` reported "0 errors, 0 warnings, 0 notes" for a setup whose
+        // run was about to drop half the drawn circuit on the floor. Every one of those findings is
+        // produced before the first frequency point is solved: on the design that prompted the brief
+        // the extract-and-mesh phase took a second or two and the solve took eleven minutes.
+        //
+        // It stays inside this verb's own two rules. It RUNS NO ANALYSIS (R-aut4-1) — `Preflight`
+        // stops at the mesh and fills no matrix — and it WRITES NO VALIDATION LOGIC (R-aut4-2):
+        // every sentence and every severity below came out of `PlanarExtractor`, `SurfaceMesher` or
+        // `PlanarSolve.LevelSeparationNotes`, which is what the GUI's own Simulate calls. It also
+        // writes no FILES, so it runs on a read-only tree and on a workspace another process has
+        // open, which is the property that makes `check` usable at all.
+        EmPreflightResult pre;
+        try { pre = EmRunService.Preflight(setup, resolution.Source); }
+        catch (Exception ex)
+        {
+            f.Add(CliDiagnostics.CheckEmRefused(path, ex.Message));
+            return;
+        }
+
+        foreach (var finding in pre.Findings)
+            f.Add(CliDiagnostics.CheckEmFinding(path, finding.Text, finding.IsWarning));
+
+        if (pre.Refusal is { } refusal) f.Add(CliDiagnostics.CheckEmRefused(path, refusal));
+        else f.Add(CliDiagnostics.CheckEmWouldRun(
+            path, pre.KernelName, pre.PlanarMesh?.Mesh.Bases.Count ?? 0));
     }
 
     private static void CheckAssemblyRules(string path, Findings f)

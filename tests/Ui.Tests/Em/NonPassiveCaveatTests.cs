@@ -28,7 +28,7 @@ public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
             UnknownCount     = 0,
             StandardCount    = 0,
             CoreBuildMs      = 0,
-            Notes            = [],
+            Findings         = [],
             NonPassivePoints = nonPassive,
         };
 
@@ -93,7 +93,7 @@ public sealed class NonPassiveCaveatTests(ITestOutputHelper output)
         var r = new PlanarSolveResult
         {
             Points = [], CoreFillCount = 0, UnknownCount = 0, StandardCount = 0, CoreBuildMs = 0,
-            Notes = [],
+            Findings = [],
             FeedClearances = [new PlanarFeedClearance(ports[0].Number, PlanarNeighbourClass.Driven,
                                                       50e-6, 500e-6, 100e-6, 300e-6)],
             NonPassivePoints = [new PlanarPassivityExcess(160e6, 1.09)],

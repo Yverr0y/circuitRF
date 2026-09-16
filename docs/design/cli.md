@@ -494,11 +494,20 @@ each, and the verb prints all three under those labels rather than flattening th
 | Prefix | Means |
 |---|---|
 | `note:` | the run explaining itself — which kernel ran and why, the mesh's own sentences, RLGC, ports |
-| `warning:` | something to act on — a stale `.sNp` about to be replaced, a technology that resolved but failed validation |
+| `warning:` | an answer was produced and something in it is NOT what was drawn — a level with artwork dropped, a drawn via discarded, a stale `.sNp` about to be replaced, `cell/separation` past the range it was measured over |
 | `error:` | something the user asked for and did not get — a results file that could not be written |
 
 Flattening them into one list is the exact defect the three-list split was introduced to fix, and it
 is just as wrong on a terminal as it was in the Messages region.
+
+**Worst first, and the class is DATA** (`brief-em-run-severity-and-check.md` R-emsev-1). Errors, then
+warnings, then notes. Grouping alone is half the answer: a run of this shape produces of order
+thirty-five lines and a reader works down from the top, which is how three sentences saying a user's
+capacitor had been removed from the solve went unread among the core count and the equal-area via
+substitution. Which list a line goes on is decided by the `EmFinding.Severity` its PRODUCER attached
+— `PlanarExtractor`, `SurfaceMesher`, `PlanarSolve` — never by which list a call site happened to
+append to, and never by a `"WARNING: "` prefix in the prose, which nothing downstream can read
+without being told the spelling.
 
 ### 8.4 Exit codes: a refusal stays a refusal
 
@@ -623,12 +632,22 @@ rather than missing; what `src/Cli/Check.cs` adds is the WALK and the reporting,
 | `TechValidation.Analyze` | `src/Design/Layout` | a `.ctech`'s problems, already typed as `TechProblem` |
 | `TechnologyResolver.ResolveForDocument` | `src/Design/Layout` | the technology walk-up |
 | `EmSetupResolver.Resolve` | `src/Design/Layout/Em` | a `.cem`'s layout and technology, and its refusals |
+| `EmRunService.Preflight` | `src/Design/Layout/Em` | a `.cem`'s EXTRACTION and MESH — everything wrong with a run that is knowable before the first frequency point is solved |
 | `CellSymbolResolver` | `src/Design/Schematic` | every cell reference on a schematic |
 | `NetExtractor` | `src/Design/Schematic` | naming conflicts — two labels on one physical net |
 | `Elaborator.Elaborate` | `src/Core/Elaboration` | parameters, expressions, cycles, node numbering |
 | `ChainSelector` | `src/Cli/ChainSelection.cs` | whether a declared analysis chain will dispatch |
 | `DrcPredicateParser` | `src/Design/Layout/Drc` | a `.wasm` rule that will not parse |
 | `DrcEngine` | `src/Design/Layout/Drc` | layout design rules |
+
+**A `.cem` is extracted and meshed, and never solved** (`brief-em-run-severity-and-check.md`
+R-emsev-5). `EmRunService.Preflight` is the first half of `EmRunService.Run` — the same flatten, the
+same two extractors, the same registry choice, the same ports, the same mesh — **factored out of
+`RunCore` so both call it**, with the solve left off the end. Every finding a run reports is produced
+before the first frequency point: on the design that motivated EM-SEV the extract-and-mesh phase is a
+second or two and the solve is eleven minutes, and a run that had silently dropped half the drawn
+circuit used to `check` clean. It writes nothing, exactly as §10.1 requires, and the findings carry
+the severity their PRODUCER attached (`EmFinding`), never one this verb invents.
 
 **A rule that exists only in `check` is a rule the GUI does not enforce** — a design would pass here
 and be refused when someone opened it. The converse matters just as much and cost a round to find:

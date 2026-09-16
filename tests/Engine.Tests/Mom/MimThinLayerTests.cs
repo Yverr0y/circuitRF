@@ -267,7 +267,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         _out.WriteLine(string.Join("\n", notes));
 
         Assert.Single(notes);
-        Assert.Contains("levels 0 and 1", notes[0]);
+        Assert.Contains("levels 0 and 1", notes[0].Text);
     }
 
     [Fact]
@@ -293,7 +293,12 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         var (verdict, notes) = PlanarSolve.VerticalRangeVerdict(p, mesh, 10e9);
 
         Assert.True(verdict.Ok, verdict.Reason);
-        Assert.Contains(notes, n => n.Contains("CELL/SEPARATION"));
+        Assert.Contains(notes, n => n.Text.Contains("CELL/SEPARATION"));
+
+        // EM-SEV R-emsev-4: and it rides the sweep AS A WARNING. The capitals this sentence has
+        // always carried were the author reaching for a class the type system did not have.
+        Assert.All(notes.Where(n => n.Text.Contains("CELL/SEPARATION")),
+                   n => Assert.True(n.IsWarning));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -457,6 +462,6 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
             ],
             GroundedSlab.GaAsStarter, 10e9, null, MimStack(d), null);
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
-        return Assert.Single(PlanarSolve.LevelSeparationNotes(p, mesh, 10e9));
+        return Assert.Single(PlanarSolve.LevelSeparationNotes(p, mesh, 10e9)).Text;
     }
 }

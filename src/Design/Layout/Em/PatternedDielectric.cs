@@ -16,6 +16,8 @@
 // zero-thickness sheet — the cross-section kernel models real metal of real thickness and does not
 // read SheetAt at all (MIM-6's own recorded decision).
 
+using CircuitRF.Engine.Mom;
+
 namespace CircuitRF.Design.Layout.Em;
 
 internal static class PatternedDielectric
@@ -49,8 +51,20 @@ internal static class PatternedDielectric
     /// <para>Nothing here touches the kernel: a hand-authored stack whose dielectric genuinely is
     /// everywhere still meets every refusal it always did.</para>
     /// </summary>
+    /// <param name="plateHasArtwork">EM-SEV R-emsev-3: does the LAYOUT contain shapes on the plate
+    /// conductor? Null where the caller cannot tell, which is the same as "no". The two cases are
+    /// genuinely different findings and the caller knows both halves, so the split is made here
+    /// rather than left to the reader:
+    /// <list type="bullet">
+    /// <item>No plate drawn — MIM-7's own case, and the film's absence is CORRECT. A note, worded
+    /// exactly as it always has been, byte for byte: an interconnect-only run on a technology
+    /// carrying a capacitor module must read as though the module were not there.</item>
+    /// <item>Plate drawn, level excluded — the user drew a capacitor and this run does not contain
+    /// one. A WARNING, because half the structure on screen is not in the answer.</item>
+    /// </list></param>
     public static Stackup? Deactivate(
-        Stackup stackup, Func<string, bool> isInRun, bool revertSheetSurface, List<string> notes)
+        Stackup stackup, Func<string, bool> isInRun, bool revertSheetSurface,
+        List<EmFinding> notes, Func<string, bool>? plateHasArtwork = null)
     {
         if (!stackup.Layers.Any(l => l.Kind == StackupKind.Dielectric &&
                                      l.PresentWithLayer is { Length: > 0 }))
@@ -96,13 +110,24 @@ internal static class PatternedDielectric
             }
 
             changed = true;
-            notes.Add(
-                $"'{film.Name}' is a patterned thin film tied to '{plate}', and '{plate}' is not in " +
-                $"this run — so it enters the medium as AIR at its stated thickness{reverted}. The " +
-                "film exists only where its plate's artwork is, so a run with no plate in it does not " +
-                "carry it, and this run's interconnect is modelled exactly as it would be on a " +
-                $"technology with no capacitor module at all. Put '{plate}' in the run (draw on it, or " +
-                "add it to the analysis levels) to solve the capacitor.");
+
+            // The sentence splits on ONE question and the extractor knows the answer to it. Both
+            // halves state the same mechanism; what differs is whether it is the right outcome.
+            notes.Add(plateHasArtwork is not null && plateHasArtwork(plate)
+                ? EmFinding.Warn(
+                    $"'{film.Name}' is a patterned thin film tied to '{plate}', '{plate}' CARRIES " +
+                    "ARTWORK in this layout, and it is not in this run's analysis levels — so the " +
+                    $"film enters the medium as AIR at its stated thickness{reverted} and the " +
+                    "capacitor you drew is not in this answer. A thin-film capacitor is its two " +
+                    "plates and the film between them; with the plate level excluded, what is solved " +
+                    "is the remaining metal with a gap where the capacitor was. Add " +
+                    $"'{plate}' to this EM setup's analysis levels.")
+                : $"'{film.Name}' is a patterned thin film tied to '{plate}', and '{plate}' is not in " +
+                  $"this run — so it enters the medium as AIR at its stated thickness{reverted}. The " +
+                  "film exists only where its plate's artwork is, so a run with no plate in it does not " +
+                  "carry it, and this run's interconnect is modelled exactly as it would be on a " +
+                  $"technology with no capacitor module at all. Put '{plate}' in the run (draw on it, or " +
+                  "add it to the analysis levels) to solve the capacitor.");
         }
 
         return changed

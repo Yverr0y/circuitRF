@@ -879,3 +879,137 @@ change, and a null from a control commits nothing. The property asserted is the 
 because this suite may not call Avalonia runtime APIs; the loop itself was reproduced in a throwaway
 headless Avalonia host driving the real `EmSetupEditorView`, on the reported board and on
 `testdata/antenna`, and confirmed gone there after the fix.
+
+## A run that deleted part of the circuit read like an ordinary result (EM-SEV, 2026-09-15)
+
+`docs/sonnet-briefs/brief-em-run-severity-and-check.md`. A user drew a 3.8 nH spiral in series with
+a 1.0838 pF MIM capacitor, ran the EM setup, and got a flat open across the band. Three separate
+mechanisms had removed the capacitor from the solve, and circuitRF reported **all three**, correctly
+and in good English, as three of **thirty-five** notes at identical weight. **The prose was not the
+defect.** A run's findings carried no severity, so nothing downstream could rank them and the reader
+was asked to — on the one day they are least able to, because they do not yet know what went wrong.
+
+### The class is data, and it lives in `src/Engine/Mom`
+
+`EmFinding(EmSeverity, string)` — two classes, `Note` and `Warning`, defined by one question: **did
+this change what was solved?** A refusal is deliberately NOT a member: nothing was written, so it is
+not a finding about a result, and every path that produces one already returns it
+(`PlanarExtractionResult.Refusal`, `EmRunStatus.Refused`). Adding it would be two spellings of one
+outcome.
+
+It is in `Engine/Mom` rather than beside the extractor because **both halves of a run produce
+findings** — `PlanarExtractor` in `src/Design` and `PlanarSolve.LevelSeparationNotes` in
+`src/Engine` — and `src/Design` references `src/Engine`, never the reverse. One type both can name
+has to be on that side of the arrow.
+
+**A string converts implicitly, to `Note`.** That is what let the class be introduced without
+touching hundreds of correct `notes.Add("…")` calls, every one of which would otherwise have had to
+be re-read and re-classified in the same change that introduced the mechanism. A warning is spelled
+out (`EmFinding.Warn`), which is the right way round: the exceptional case is the one that should be
+visible in the source.
+
+**Every result type stores `Findings` and DERIVES `Notes` from it** —
+`PlanarExtractionResult`, `PlanarSolveResult`, `PlanarKernelResult`. A second stored list is a list
+that drifts, and dozens of call sites and gates read `Notes`.
+
+### The hand-written `"WARNING: "` prefix is gone, and that is the point
+
+Four sentences in `PlanarExtractor` carried it. It is the shape of the answer and also the reason it
+does not work: **nothing downstream can read a prefix it was not told about**, and every consumer
+would have had to agree on the spelling. Five gates asserted `n.StartsWith("WARNING:")` and now ask
+the class instead — which is a better question, not merely a different one.
+
+### What became a warning, and why each one
+
+| finding | was | now | because |
+|---|---|---|---|
+| a signal level with artwork dropped from the analysis | note | **warning** | artwork drawn and not solved IS "the answer is not what was drawn"; it also now NAMES the levels, which the old sentence did not |
+| a drawn via discarded (`wrongGround`, `unknownLevels`, `noSpan`) | note | **warning** | R-emsev-2: a designer who drew a via STATED a connection; dropping it severs the structure. All three arms moved together because which one fires is an accident of the stackup, not of the defect |
+| a patterned film deactivated while its plate CARRIES ARTWORK | note | **warning** | R-emsev-3 |
+| a patterned film deactivated with NO plate drawn | note | note, **byte-identical** | MIM-7's own case, and the film's absence is correct there |
+| `cell/separation` past `ValidatedCellOverSeparation` | note | **warning** | R-emsev-4; the CAPITALS the sentence already carried were the author reaching for a class the type system did not have |
+| the legitimate ground-pour crossing case (`stitched`/`toGround`) | note | note | the run made a decision and made it right |
+
+**R-emsev-4's REFUSAL was not built, and MIM-8 landing is why.** The brief made it conditional on
+MIM-8 being declined. MIM-8 landed: the peak is subtracted in closed form, `ValidatedCellOverSeparation`
+moved 5 → 200 on re-measured ladders, and past the bound the note already says *unmeasured* rather
+than *wrong*. **There is no wrong-sign rung left to refuse on**, and refusing on "unmeasured" would
+be inventing a limit rather than reporting one (R-prt-13). The warning is the whole of it.
+
+### `EmRunService` splits by class into the three lists it already had
+
+`EmRunResult` has carried `Warnings` / `Notes` / `Errors` since the owner's 2026-08-09 report about
+the yellow warning icon. That split was made with the only tool available then — **which list a call
+site happened to append to** — so every extraction sentence landed in `notes` regardless of what it
+said. `AddFindings` is now the one place the class decides, and **order within each list is
+preserved**: the producers write in a deliberate order (the crossing note before the warning it
+qualifies, the mesh's sentences in mesh order) and sorting would break sentences that refer to each
+other.
+
+**The CLI's `em` printer and the Messages panel print WORST FIRST.** Grouping is half the answer; a
+reader works down from the top, and there are of order thirty-five lines to work down.
+
+### `circuitrf check <path>.cem` runs the extraction and the mesh, and nothing else
+
+The highest-value item in the brief and the cheapest: **every finding in a run's report is produced
+before the first frequency point is solved.** On the user's design the extract-and-mesh phase is a
+second or two and the solve is eleven minutes. `check` on that file used to print
+`0 error(s), 0 warning(s), 0 note(s)`; it now prints three warnings and fourteen notes in **0.2 s**.
+
+**It is FACTORED out of `RunCore`, not written beside it.** `EmRunService.Extract` is the first half
+of every run — flatten, both extractors, the registry's choice, the internal-port refusal — and
+`RunCore` and the new `EmRunService.Preflight` both call it. A second copy would be a second account
+of which extractor is chosen and what each is handed, and nothing would report the drift. That is
+`check`'s own rule (R-aut4-2) applied one level down.
+
+`Preflight` writes nothing at all and applies no port-type migration, so it runs on a read-only tree
+and on a workspace another process has open. It returns `EmPreflightResult`, which has **no
+`Status`** on purpose: the only two outcomes of this phase are "it would run" and "it was refused",
+and a null-or-not `Refusal` says which.
+
+**The brief's exit-code premise is wrong about `check`'s own rule, and was not acted on.** It says
+"warnings exit non-zero at the default severity, per `check`'s own rule". `check`'s default
+threshold is `error` and warnings are reported and exit 0 — deliberately, and every other arm of the
+verb depends on it. Changing the default to make one gate pass would change the exit code of every
+warning the verb already produces, so the gate asks for `--severity warning` and asserts BOTH: 1
+there, 0 at the default with the warnings still printed.
+
+### The one line that reaches the user BEFORE the run
+
+R-emsev-6. Everything else here improves a report read afterwards. `ExcludedArtworkNote` sits under
+the analysis-level list in the EM setup editor and says *"'MIM Metal' carries artwork in this layout
+and is not ticked"* while the tick box that fixes it is on screen.
+
+It fires **only when the setup NAMES its levels** — with the list empty the extractor includes every
+level with artwork, so there is nothing excluded, and a line on every untouched setup would be noise
+on the overwhelmingly common case. The survey is `PlanarExtractor.SurveyArtwork`'s, not the view
+model's: how a drawing layer binds to a stackup entry is the extractor's rule, and a copy in the
+panel would miss the two traps — a via entry's drawing layer is never in the conductor binding, and a
+NON-PLATED via entry binds to nothing at all.
+
+**It had to be a `SelectableTextBlock`**, which `EmSetupLayoutRowTests.EveryWarningColouredString_IsSelectable`
+caught immediately: that gate asks of the FOREGROUND rather than of a list of known names, so a
+warning added later is covered by it instead of quietly falling outside it.
+
+### Gates
+
+- `MimCapacitorTests.LeavingThePlateLevelOut_WarnsThreeTimes_AndSeversTheCapacitor` — the three
+  warnings, and the severance shown **from the extracted problem** rather than from a solve. A raw
+  solve of this shape reads −46 dB, which is an argument about a number; the extraction is
+  categorical (no via joins the two levels, and the film is air), costs milliseconds, and a solve
+  could not make it stronger.
+- `MimCapacitorTests.AnAirbridgePost_SolvesOnTheOneTechnology_…` gained `Assert.Empty(shipped.Warnings)`
+  — the interconnect-only run must report ZERO warnings, or the class stops meaning anything on the
+  runs where it does.
+- `EmRunSeverityCliTests` — the real `check` and `em` verbs as processes: ≥ 2 warnings naming
+  `MIM Metal`, the two exit codes, a before/after directory snapshot proving nothing was written,
+  and a timing bound that says "seconds, not minutes".
+- `EmCliVerbTests`' byte-for-byte `.sNp` identity is untouched and still passes. **Severity changes
+  reporting, never a number.**
+
+### Out of scope, named because it turned up in the same investigation
+
+An SnP consumed outside its own frequency range says nothing. The user's testbench sweeps 1–10 GHz
+against a 0.5–5 GHz `.s2p` with `ExtrapMode=NearestEdge`, so the top half of every curve is the 5 GHz
+value held flat, and no note is emitted anywhere. Real, separate, and an elaboration concern rather
+than an EM one.

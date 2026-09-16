@@ -124,7 +124,9 @@ public sealed class SuperstrateNotInTheSolveTests
         Assert.True(covered.Ok, covered.Refusal);
 
         string warning = Assert.Single(covered.Notes.Where(n => n.Contains("'Radome'")));
-        Assert.StartsWith("WARNING:", warning);
+        // EM-SEV R-emsev-1: it is a warning because its CLASS says so, not because the sentence
+        // starts with the word.
+        Assert.Contains(warning, covered.Warnings);
         Assert.Contains("NOT in this solve", warning);
         Assert.Contains("Top Copper", warning);
         Assert.Contains("UNCOVERED", warning);

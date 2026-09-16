@@ -559,6 +559,16 @@
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
+                        <!-- EM-SEV R-emsev-6 — the only part of that brief that reaches the user
+                             BEFORE the run. Everything else it asks for improves a report read
+                             afterwards; this is one line, here, while the tick boxes that fix it are
+                             on screen. Hidden unless there is something to say (the VM returns null
+                             when the level list is empty, which is the common untouched case). -->
+                        <SelectableTextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Foreground="{DynamicResource CrfWarningBrush}"
+                                   IsVisible="{Binding ViewModel.ExcludedArtworkNote,
+                                                       Converter={x:Static ObjectConverters.IsNotNull}}"
+                                   Text="{Binding ViewModel.ExcludedArtworkNote}"/>
                     </StackPanel>
                 </Expander>
 

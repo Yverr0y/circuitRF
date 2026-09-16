@@ -91,11 +91,259 @@ public sealed record EmRunResult(
     Diagnostic? Diagnostic = null);
 
 /// <summary>
+/// <b>What <see cref="EmRunService.Preflight"/> found</b> — the extract-and-mesh phase of a run,
+/// with nothing solved and nothing written (EM-SEV R-emsev-5).
+///
+/// <para>There is no <c>Status</c> here and deliberately so: the only two outcomes this phase has
+/// are "it would run, here is what it would solve" and "it was refused, here is why", and a
+/// <see cref="Refusal"/> that is null or not says which. Everything else a run reports — a file that
+/// could not be written, a cancelled sweep — belongs to the half this does not perform.</para>
+/// </summary>
+/// <param name="Kind">Which kernel the registry chose, never <see cref="EmAnalysisKind.Auto"/>.</param>
+/// <param name="KernelName">Its name, for a report that has to say which one answered.</param>
+/// <param name="Findings">Every sentence produced, in report order, each carrying its class.</param>
+/// <param name="Refusal">Null when this setup would run; otherwise the sentence saying why not,
+/// exactly as the run itself would word it.</param>
+/// <param name="PlanarMesh">The mesh that was built, when the planar kernel was chosen and got that
+/// far — so a caller can report the unknown count it would have solved.</param>
+public sealed record EmPreflightResult(
+    EmAnalysisKind           Kind,
+    string                   KernelName,
+    IReadOnlyList<EmFinding> Findings,
+    string?                  Refusal = null,
+    PlanarMeshReport?        PlanarMesh = null)
+{
+    public bool Ok => Refusal is null;
+
+    /// <summary>The findings that say the answer would not be what was drawn.</summary>
+    public IReadOnlyList<string> Warnings => EmFindings.WarningTexts(Findings);
+
+    /// <summary>The findings that are the run explaining itself.</summary>
+    public IReadOnlyList<string> Notes => EmFindings.NoteTexts(Findings);
+}
+
+/// <summary>
 /// Headless. Everything the Simulate button does that is not dispatcher work, so it is testable
 /// without a document, a canvas or a workspace — the same rule R-em-1 puts on the extractor.
 /// </summary>
 public static class EmRunService
 {
+    // ── EM-SEV R-emsev-5 — THE EXTRACT-AND-MESH PHASE, AS A THING A CALLER CAN ASK FOR ────────
+    //
+    // Every finding in a run's report is produced BEFORE the first frequency point is solved. On the
+    // design that prompted this brief the extraction and mesh completed in a second or two and the
+    // solve took eleven minutes — so "did this run keep my whole circuit?" is answerable in seconds,
+    // and until now the only way to ask was to run the eleven minutes.
+    //
+    // It is FACTORED OUT of RunCore rather than written beside it. A second copy of this sequence
+    // would be a second account of which extractor is chosen and what each one is handed, and
+    // nothing would report the drift — which is the same rule `circuitrf check` itself is built on
+    // (R-aut4-2: a validator that exists only in the checker is a rule the application does not
+    // enforce).
+
+    /// <summary>What <see cref="Extract"/> found: both extractors, the registry's choice, and every
+    /// finding produced up to that point, in report order.</summary>
+    private readonly record struct EmExtractPhase(
+        EmGeometry.Result       Geometry,
+        EmExtractionResult      CrossSection,
+        PlanarExtractionResult  Planar,
+        EmKernelChoice          Choice,
+        List<EmFinding>         Findings,
+        Diagnostic?             InternalPortRefusal);
+
+    /// <summary>
+    /// Flatten, run BOTH extractors, and let the registry choose — the first half of every run.
+    ///
+    /// <para>Both extractors run on every launch because the registry needs BOTH verdicts to word
+    /// either outcome (R-res-1): an explicit cross-section setup that gets refused has to be told
+    /// that the planar kernel accepts the geometry, and an explicit planar one has to be told when
+    /// the cheap kernel would have done. Extraction is geometry-only and costs nothing next to a
+    /// solve; this is not the expensive half.</para>
+    ///
+    /// <para>The geometry is flattened exactly as the editor's own Refresh does — the run and the
+    /// panel must never disagree about what geometry the setup is pointed at.</para>
+    /// </summary>
+    private static EmExtractPhase Extract(EmSetup setup, EmLayoutSource source, double fMax)
+    {
+        var findings = new List<EmFinding>();
+
+        var geometry = EmGeometry.Flatten(source.View, source.AbsolutePath);
+        findings.AddRange(EmFindings.AsNotes(geometry.Notes));
+
+        var crossSection = CrossSectionExtractor.Extract(
+            geometry.Shapes, source.Technology!, source.DbuPerMicron,
+            setup.ToExtractionSettings(setup.LayoutRef));
+
+        var planar = PlanarExtractor.Extract(
+            geometry.Shapes, source.Technology!, source.DbuPerMicron, fMax,
+            setup.ToExtractionSettings(setup.LayoutRef), geometry.GeneratorIds);
+
+        var choice = EmKernelRegistry.Choose(
+            setup.AnalysisKind,
+            crossSection.Ok ? EmExtractorVerdict.Yes : EmExtractorVerdict.No(crossSection.Refusal ?? ""),
+            planar.Ok       ? EmExtractorVerdict.Yes : EmExtractorVerdict.No(planar.Refusal ?? ""));
+
+        // ── AN INTERNAL DELTA GAP IS A FULL-WAVE PORT, AND Auto WOULD SILENTLY DROP IT ───────────
+        //
+        // A uniform line carrying an interior gap is still a uniform CROSS-SECTION, so kernel A
+        // accepts it and Auto prefers A whenever A accepts. Kernel A never meshes the plane — its two
+        // ports are the ends of the extracted line by construction — so there is nowhere for the gap
+        // to be and nothing that would report its absence: the run would publish a complete,
+        // plausible s-matrix for the line WITHOUT the port the user asked for.
+        //
+        // Refused by name rather than silently re-routed to the planar kernel. Re-routing would be a
+        // guess at intent that costs minutes of solve time, and the remedy is one dropdown.
+        if (choice.Ok && choice.Kind == EmAnalysisKind.CrossSection
+            && EmPortExtraction.AnyNonEdgePort(source.View.Shapes))
+            return new EmExtractPhase(geometry, crossSection, planar, choice, findings,
+                                      EmDiagnostics.InternalPortNeedsFullWave(choice.KernelName));
+
+        findings.Add(choice.Reason);
+
+        // The CHOSEN extractor's findings, whichever way it went and whether or not it accepted —
+        // the "N shapes were ignored" lines are as useful next to a refusal as next to an answer.
+        findings.AddRange(choice.Kind == EmAnalysisKind.Planar
+                              ? planar.Findings
+                              : EmFindings.AsNotes(crossSection.Notes));
+
+        return new EmExtractPhase(geometry, crossSection, planar, choice, findings, null);
+    }
+
+    /// <summary>
+    /// <b>The extract-and-mesh phase alone: what this setup would solve, and everything wrong with
+    /// it that is knowable before a matrix is filled</b> (EM-SEV R-emsev-5).
+    ///
+    /// <para><b>It never solves and it writes nothing</b>, so it runs on a read-only tree, on a
+    /// workspace another process has open, and in the seconds a build machine can spare. That is the
+    /// whole of its value: the three findings that told the user their capacitor had been removed
+    /// from the run were all produced here, minutes before the answer that hid them.</para>
+    ///
+    /// <para>It owns no analysis of its own — every finding comes from <see cref="EmGeometry"/>,
+    /// the two extractors, <see cref="SurfaceMesher"/> and
+    /// <see cref="PlanarSolve.LevelSeparationNotes"/>, which is what the GUI's own Simulate calls.
+    /// </para>
+    /// </summary>
+    /// <param name="control">Cancellation for the mesh, which on a large board is the one part of
+    /// this that takes noticeable time. Progress is reported through it as a run's would be.</param>
+    public static EmPreflightResult Preflight(
+        EmSetup setup, EmLayoutSource? source, RunControl? control = null)
+    {
+        ArgumentNullException.ThrowIfNull(setup);
+
+        if (source is null)
+            return new EmPreflightResult(EmAnalysisKind.CrossSection, "", [],
+                                         EmDiagnostics.NoLayout(setup.LayoutRef).Render());
+        if (source.Technology is null)
+            return new EmPreflightResult(EmAnalysisKind.CrossSection, "", [],
+                                         EmDiagnostics.NoTechnology(setup.LayoutRef).Render());
+
+        var findings = new List<EmFinding>();
+
+        // A port-type migration is a change to the DOCUMENT, and this call promises to write
+        // nothing — so unlike RunCore it is not applied. What it would move does not reach any
+        // finding below it.
+
+        double fMax = 0;
+        double[] freqs = [];
+        try { freqs = setup.Frequency.Expand(); }
+        catch (Exception ex)
+        {
+            return new EmPreflightResult(EmAnalysisKind.CrossSection, "", [],
+                                         EmDiagnostics.FrequencySweepUnresolvable(ex.Message).Render());
+        }
+        if (freqs.Length == 0)
+            return new EmPreflightResult(EmAnalysisKind.CrossSection, "", [],
+                                         EmDiagnostics.FrequencySweepEmpty().Render());
+        foreach (double f in freqs) fMax = Math.Max(fMax, f);
+
+        var pre = Extract(setup, source, fMax);
+        findings.AddRange(pre.Findings);
+
+        if (pre.InternalPortRefusal is { } internalPort)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         internalPort.Render());
+
+        if (!pre.Choice.Ok)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         pre.Choice.Refusal);
+
+        // Kernel A has no mesh to build ahead of its solve — its two ports are the ends of the
+        // extracted line by construction — so the extraction IS the whole of its preflight.
+        if (pre.Choice.Kind != EmAnalysisKind.Planar || pre.Planar.Problem is not { } problem)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings, null);
+
+        var kernel  = new PlanarKernel();
+        var verdict = kernel.CanSolve(problem);
+        if (!verdict.Ok)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         verdict.Reason);
+
+        // The ports, then the ground paths they grow — the same order and the same arguments
+        // RunPlanar uses. A preview of the bare extraction would be a preview of a structure the run
+        // does not solve, and the port's own footprint would be missing from the mesh.
+        var ports = EmPortExtraction.Extract(
+            source.View.Shapes, problem, source.DbuPerMicron, setup.ResolvePortZ0,
+            source.View.DisplayUnit,
+            EmPortExtraction.DefaultGroundPathWidthM(source.Technology));
+
+        findings.AddRange(EmFindings.AsNotes(ports.Notes));
+        if (!ports.Ok)
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         ports.Refusal);
+
+        var meshed = ports.Ports.Count > 0
+            ? PlanarGroundPath.Extend(problem, ports.Ports).Problem
+            : problem;
+
+        PlanarMeshReport report;
+        try
+        {
+            report = SurfaceMesher.Mesh(
+                meshed, setup.PlanarMesh, PlanarEdgeReference.LocalConductorWidth, control,
+                accelerated: SurfaceMesher.UsesAcceleratedCeiling(
+                    setup.AcceleratedSolve, meshed.RequiresGeneralKernel),
+                lengthFormat: EmLengthFormat.For(source.View.DisplayUnit, source.DbuPerMicron),
+                ports: ports.Ports);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings,
+                                         EmDiagnostics.SolveFailed(ex.Message).Render());
+        }
+
+        findings.AddRange(EmFindings.AsNotes(report.Notes));
+
+        // MIM-3/MIM-8's question, which is a property of the MESH against the STACKUP and needs no
+        // solve to answer — and which, past the measured bound, is EM-SEV R-emsev-4's warning.
+        findings.AddRange(PlanarSolve.LevelSeparationNotes(
+            meshed, report.Mesh, fMax,
+            EmLengthFormat.For(source.View.DisplayUnit, source.DbuPerMicron)));
+
+        return new EmPreflightResult(pre.Choice.Kind, pre.Choice.KernelName, findings, null,
+                                     report);
+    }
+
+    /// <summary>
+    /// <b>EM-SEV R-emsev-1 — the one place a finding's class decides which list it goes out on.</b>
+    ///
+    /// <para>The three lists on <see cref="EmRunResult"/> already asked the right question — what is
+    /// the reader expected to DO about this? — and had no way to answer it except by where a call
+    /// site chose to append. So every sentence an extractor or a sweep produced went out as a note,
+    /// including the ones saying that part of the drawn structure is not in the answer. The class
+    /// travels with the sentence now, and this is where it is read.</para>
+    ///
+    /// <para>Order within each list is preserved, which matters: the producers write in a deliberate
+    /// order (the crossing note before the warning it qualifies, the mesh's own sentences in mesh
+    /// order) and interleaving or sorting them would break sentences that refer to each other.</para>
+    /// </summary>
+    private static void AddFindings(
+        IEnumerable<EmFinding> findings, List<string> notes, List<string> warnings)
+    {
+        foreach (var f in findings)
+            (f.IsWarning ? warnings : notes).Add(f.Text);
+    }
+
     /// <summary>
     /// R-em-19: the <c>.snp</c> lands at a PREDICTABLE path derived from the layout and setup names,
     /// mirroring <see cref="ResultsWriter"/>'s own convention, so a schematic's SnP reference is stable
@@ -273,46 +521,28 @@ public static class EmRunService
         // solve; this is not the expensive half.
         // Flattened, exactly as the editor's own Refresh does — the run and the panel must never
         // disagree about what geometry the setup is pointed at.
-        var geometry = EmGeometry.Flatten(source.View, source.AbsolutePath);
-        notes.AddRange(geometry.Notes);
+        var pre = Extract(setup, source, fMax);
+        var (geometry, crossSection, planar, choice) =
+            (pre.Geometry, pre.CrossSection, pre.Planar, pre.Choice);
 
-        var crossSection = CrossSectionExtractor.Extract(
-            geometry.Shapes, source.Technology, source.DbuPerMicron,
-            setup.ToExtractionSettings(setup.LayoutRef));
-
-        var planar = PlanarExtractor.Extract(
-            geometry.Shapes, source.Technology, source.DbuPerMicron, fMax,
-            setup.ToExtractionSettings(setup.LayoutRef), geometry.GeneratorIds);
-
-        var choice = EmKernelRegistry.Choose(
-            setup.AnalysisKind,
-            crossSection.Ok ? EmExtractorVerdict.Yes : EmExtractorVerdict.No(crossSection.Refusal ?? ""),
-            planar.Ok       ? EmExtractorVerdict.Yes : EmExtractorVerdict.No(planar.Refusal ?? ""));
-
-        // ── AN INTERNAL DELTA GAP IS A FULL-WAVE PORT, AND Auto WOULD SILENTLY DROP IT ───────────
-        //
-        // A uniform line carrying an interior gap is still a uniform CROSS-SECTION, so kernel A
-        // accepts it and Auto prefers A whenever A accepts. Kernel A never meshes the plane — its two
-        // ports are the ends of the extracted line by construction — so there is nowhere for the gap
-        // to be and nothing that would report its absence: the run would publish a complete,
-        // plausible s-matrix for the line WITHOUT the port the user asked for.
-        //
-        // Refused by name rather than silently re-routed to the planar kernel. Re-routing would be a
-        // guess at intent that costs minutes of solve time, and the remedy is one dropdown.
-        if (choice.Ok && choice.Kind == EmAnalysisKind.CrossSection
-            && EmPortExtraction.AnyNonEdgePort(source.View.Shapes))
+        if (pre.InternalPortRefusal is { } internalPort)
         {
-            var d = EmDiagnostics.InternalPortNeedsFullWave(choice.KernelName);
+            // The geometry notes are the only ones worth carrying to a refusal this early — the
+            // choice's reason names a kernel that is not going to run.
+            AddFindings(EmFindings.AsNotes(geometry.Notes), notes, warnings);
             return new EmRunResult(EmRunStatus.Refused, null, crossSection.Readback, null, null, null,
-                d.Render(), warnings, Notes: notes, Errors: errors,
-                Kind: choice.Kind, KernelName: choice.KernelName, Diagnostic: d);
+                internalPort.Render(), warnings, Notes: notes, Errors: errors,
+                Kind: choice.Kind, KernelName: choice.KernelName, Diagnostic: internalPort);
         }
 
-        notes.Add(choice.Reason);
-
-        // The CHOSEN extractor's notes, whichever way it went and whether or not it accepted — the
-        // "N shapes were ignored" lines are as useful next to a refusal as next to an answer.
-        notes.AddRange(choice.Kind == EmAnalysisKind.Planar ? planar.Notes : crossSection.Notes);
+        // EM-SEV R-emsev-1 — the findings are SPLIT here, by the class the producer attached, into
+        // the two lists this result has carried since the owner's 2026-08-09 report ("a lot of the
+        // Messages after the EM sim have the yellow warning icon; change those to info"). That split
+        // was made with the only tool available then — which list a call site happened to append to —
+        // and every extraction sentence landed in `notes` regardless of what it said. A run that
+        // deleted half the user's circuit reported it three times, correctly, at the weight of the
+        // core count.
+        AddFindings(pre.Findings, notes, warnings);
 
         if (!choice.Ok)
         {
@@ -603,8 +833,9 @@ public static class EmRunService
                 KernelName: choice.KernelName, Diagnostic: d);
         }
 
-        // R-em-16, unchanged for kernel B: the engine's own notes go out verbatim.
-        notes.AddRange(solved.Notes);
+        // R-em-16, unchanged for kernel B: the engine's own notes go out verbatim — and, since
+        // EM-SEV, into the list its own class names. The level-separation warning rides here.
+        AddFindings(solved.Findings, notes, warnings);
 
         // D9/R-res-9 — compare BEFORE overwriting, exactly as kernel A does.
         string? snpPath = ResolveSnpPath(resultsRoot, setup, ports.Ports.Count);

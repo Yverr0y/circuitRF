@@ -481,6 +481,11 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// None checked means "infer", which is every level that carries artwork.</summary>
     [ObservableProperty] private ObservableCollection<EmAnalysisLevelRow> _analysisLevelRows = [];
 
+    /// <summary>EM-SEV R-emsev-6 — null when nothing drawn is being left out, otherwise the one
+    /// sentence naming what is. Shown under the analysis-level list; see
+    /// <see cref="UpdateExcludedArtworkNote"/>.</summary>
+    [ObservableProperty] private string? _excludedArtworkNote;
+
     /// <summary>The ports the layout's own <c>IsPort</c> labels resolved to, for the panel's port
     /// list and for the R18 readback. Empty for a cross-section setup, whose two ports ARE the two
     /// ends of the extracted line by construction.</summary>
@@ -1641,6 +1646,11 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         var geometry = EmGeometry.Flatten(source.View, source.AbsolutePath);
         _geometryNotes = geometry.Notes;
 
+        // EM-SEV R-emsev-6 — the one line the user would have seen BEFORE spending eleven minutes.
+        // Flattened shapes, for the reason above: the artwork of a schematic-generated layout is all
+        // inside placed instances.
+        UpdateExcludedArtworkNote(geometry.Shapes, source.Technology);
+
         var crossSection = CrossSectionExtractor.Extract(
             geometry.Shapes, source.Technology, source.DbuPerMicron,
             Working.ToExtractionSettings(Working.LayoutRef));
@@ -2426,6 +2436,59 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
             }
         AnalysisLevelRows = rows;
         OnPropertyChanged(nameof(AnalysisLevelsSummary));
+    }
+
+    /// <summary>
+    /// <b>EM-SEV R-emsev-6 — one line under the analysis-level list, while the dialog is still
+    /// open.</b>
+    ///
+    /// <para>Everything else in this brief improves a REPORT the user reads after the run. This is
+    /// the only part that reaches them before it, and on the design that prompted the brief that is
+    /// the difference between one tick box and eleven minutes followed by a flat open across the
+    /// band and no idea why.</para>
+    ///
+    /// <para><b>It only fires when the setup NAMES its levels.</b> With the list empty the extractor
+    /// includes every level that carries artwork, so there is nothing excluded to warn about — and a
+    /// line that appeared on every untouched setup would be noise on the overwhelmingly common
+    /// case.</para>
+    ///
+    /// <para>The survey is <see cref="PlanarExtractor.SurveyArtwork"/>'s, not this file's: how a
+    /// drawing layer binds to a stackup entry is the extractor's rule, and a second copy here would
+    /// be a second answer to it. Names are matched against <see cref="AnalysisLevelRows"/> so the
+    /// line can only ever name a level the user can see a checkbox for.</para>
+    /// </summary>
+    private void UpdateExcludedArtworkNote(IReadOnlyList<LayoutShape> shapes, Technology tech)
+    {
+        if (Working.AnalysisLevelNames.Count == 0) { ExcludedArtworkNote = null; return; }
+
+        var survey    = PlanarExtractor.SurveyArtwork(shapes, tech);
+        var tickable  = AnalysisLevelRows.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
+        var included  = Working.AnalysisLevelNames.ToHashSet(StringComparer.Ordinal);
+
+        // Two different statements, so they are counted apart: metal that is drawn and not solved,
+        // and a connection that is drawn and not made. A via landing on an excluded level is the
+        // sharper of the two — it severs the structure rather than thinning it.
+        var drawn = survey.ConductorsWithArtwork
+            .Where(n => tickable.Contains(n) && !included.Contains(n))
+            .OrderBy(n => n, StringComparer.Ordinal).ToList();
+        var viaEnds = survey.ConductorsDrawnViasSpan
+            .Where(n => tickable.Contains(n) && !included.Contains(n) && !drawn.Contains(n))
+            .OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+        if (drawn.Count == 0 && viaEnds.Count == 0) { ExcludedArtworkNote = null; return; }
+
+        var parts = new List<string>();
+        if (drawn.Count > 0)
+            parts.Add($"{string.Join(", ", drawn.Select(n => $"'{n}'"))} " +
+                      $"{(drawn.Count == 1 ? "carries" : "carry")} artwork in this layout and " +
+                      $"{(drawn.Count == 1 ? "is" : "are")} not ticked");
+        if (viaEnds.Count > 0)
+            parts.Add($"a drawn via lands on {string.Join(", ", viaEnds.Select(n => $"'{n}'"))}, " +
+                      "which is not ticked");
+
+        ExcludedArtworkNote =
+            string.Join("; ", parts) +
+            " — that metal is not meshed and contributes nothing to the answer.";
     }
 
     private void OnAnalysisLevelToggled(EmAnalysisLevelRow row)

@@ -252,7 +252,8 @@ public sealed class FlippedStackReturnPlaneTests
         string note = Assert.Single(
             r.Notes, n => n.Contains("which this run would normally solve by mirroring", StringComparison.Ordinal));
         Assert.Contains("'Lower Dielectric'", note, StringComparison.Ordinal);
-        Assert.StartsWith("WARNING:", note, StringComparison.Ordinal);
+        // EM-SEV R-emsev-1: the CLASS, not a prefix in the prose.
+        Assert.Contains(note, r.Warnings);
     }
 
     // ── The explicit spelling ────────────────────────────────────────────────────────────────

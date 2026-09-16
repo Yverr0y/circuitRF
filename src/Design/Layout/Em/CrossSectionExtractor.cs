@@ -207,10 +207,20 @@ public static class CrossSectionExtractor
         // `groundBand` are Band objects out of the OLD list and the arithmetic below reads their
         // materials. There is no sheet surface to revert: this kernel models real metal of real
         // thickness and never reads SheetAt (MIM-6).
-        if (PatternedDielectric.Deactivate(
+        //
+        // EM-SEV: the shared rule carries a CLASS on each sentence now (R-emsev-1), and this
+        // extractor's own report is still a list of plain strings — so the findings are collected
+        // and their text appended. No `plateHasArtwork`: a uniform-line cross-section has one signal
+        // conductor and refuses multi-level geometry outright, so "the plate is drawn but excluded"
+        // is not a state this kernel can be in, and passing null is the accurate answer rather than
+        // an omission.
+        var dielectricFindings = new List<EmFinding>();
+        var effective = PatternedDielectric.Deactivate(
                 tech.Stackup,
                 name => string.Equals(name, signal.Layer.Name, StringComparison.Ordinal),
-                revertSheetSurface: false, notes) is { } effectiveStackup)
+                revertSheetSurface: false, dielectricFindings);
+        notes.AddRange(dielectricFindings.Select(x => x.Text));
+        if (effective is { } effectiveStackup)
         {
             stack      = BuildStack(effectiveStackup);
             signal     = stack.First(b => b.Index == signal.Index);

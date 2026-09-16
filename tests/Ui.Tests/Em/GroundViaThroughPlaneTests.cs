@@ -403,8 +403,11 @@ public class GroundViaThroughPlaneTests(ITestOutputHelper output)
         Assert.True(r.Ok, r.Refusal);
         Assert.Single(r.Problem!.ViaList);                      // only the stitch is modelled
 
-        string warn = Assert.Single(r.Notes.Where(
-            n => n.StartsWith("WARNING:", StringComparison.Ordinal)));
+        // EM-SEV R-emsev-1: the CLASS, not a prefix in the prose. Narrowed to the via warning
+        // because this board legitimately carries a SECOND one — the artwork it puts on 'Bottom
+        // Copper' is not in the analysis levels, which R-emsev-1 also classes as a warning now.
+        string warn = Assert.Single(r.Warnings.Where(
+            w => w.Contains("via(s) join", StringComparison.Ordinal)));
         _out.WriteLine(warn);
 
         Assert.Contains("1 via(s) join", warn, StringComparison.Ordinal);
@@ -443,7 +446,7 @@ public class GroundViaThroughPlaneTests(ITestOutputHelper output)
 
         // Still reported as passing through — just not as carrying the structure away.
         Assert.Contains(r.Notes, n => n.Contains("1 pass through a void", StringComparison.Ordinal));
-        Assert.DoesNotContain(r.Notes, n => n.StartsWith("WARNING:", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("via(s) join", StringComparison.Ordinal));
     }
 
     /// <summary>Nothing bypasses, so there is nothing to warn about. A warning that fires on a clean
@@ -461,7 +464,7 @@ public class GroundViaThroughPlaneTests(ITestOutputHelper output)
         // Two POINT vias are two PlanarVias — only drawn regions are grouped per entry.
         Assert.Equal(2, r.Problem!.ViaList.Count);
         Assert.All(r.Problem.ViaList, v => Assert.True(v.ToGround));
-        Assert.DoesNotContain(r.Notes, n => n.StartsWith("WARNING:", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("via(s) join", StringComparison.Ordinal));
     }
 
     /// <summary>A drawn footprint is counted the same way — the accounting is one accounting, and a

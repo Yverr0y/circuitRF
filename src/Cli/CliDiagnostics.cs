@@ -850,6 +850,41 @@ internal static class CliDiagnostics
         + "workspace states no default, so its layers have no names and no rules to check against.",
         ("path", path));
 
+    /// <summary>
+    /// EM-SEV R-emsev-5 — one finding from the extract-and-mesh phase of an EM setup, at the class
+    /// the producer attached to it. <b>Nothing here re-words and nothing here re-classifies</b>: the
+    /// sentence is <c>PlanarExtractor</c>'s or <c>PlanarSolve</c>'s, and so is the severity. A rule
+    /// that lived in <c>check</c> would be a rule the GUI does not enforce (R-aut4-2).
+    /// </summary>
+    public static Diagnostic CheckEmFinding(string path, string text, bool warning)
+        => warning ? CheckEmWarning(path, text) : CheckEmNote(path, text);
+
+    /// <summary>A finding whose class says the answer would not be what was drawn.</summary>
+    public static Diagnostic CheckEmWarning(string path, string text) => Diagnostic.Create(
+        "check.em.warning", DiagnosticSeverity.Warning,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>A finding that is the run explaining itself.</summary>
+    public static Diagnostic CheckEmNote(string path, string text) => Diagnostic.Create(
+        "check.em.note", DiagnosticSeverity.Info,
+        "{path}: {text}", ("path", path), ("text", text));
+
+    /// <summary>The extract-and-mesh phase refused. A run would not have produced an answer either,
+    /// so this is an error rather than a warning — and it is the run service's own sentence.</summary>
+    public static Diagnostic CheckEmRefused(string path, string reason) => Diagnostic.Create(
+        "check.em.refused", DiagnosticSeverity.Error,
+        "{path}: {reason}", ("path", path), ("reason", reason));
+
+    /// <summary>What the setup would solve, when it would solve: the kernel and the unknown count.
+    /// A note — it is the answer to "what does this run do", not a problem with it.</summary>
+    public static Diagnostic CheckEmWouldRun(string path, string kernel, int unknowns) =>
+        Diagnostic.Create(
+            "check.em.would-run", DiagnosticSeverity.Info,
+            unknowns > 0
+                ? "{path}: extracts and meshes — {kernel}, {unknowns} unknowns. Not solved."
+                : "{path}: extracts — {kernel}. Not solved.",
+            ("path", path), ("kernel", kernel), ("unknowns", unknowns));
+
     /// <summary>A <c>.cem</c> that resolves no layout: <c>EmSetupResolver</c> returned no source.</summary>
     public static Diagnostic CheckEmUnresolved(string path, string reason) => Diagnostic.Create(
         "check.em.unresolved", DiagnosticSeverity.Error,

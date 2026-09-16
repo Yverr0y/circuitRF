@@ -861,8 +861,8 @@ public sealed class MultiLevelPortTests
         var meshS = SurfaceMesher.Mesh(small).Mesh;
         var okS   = PlanarSolve.VerticalRangeVerdict(small, meshS, f);
         Assert.True(okS.Verdict.Ok);
-        Assert.Contains(okS.Notes, n => n.Contains("G_A^xx / G_q / mixed", StringComparison.Ordinal)
-                                     && n.Contains("inside", StringComparison.Ordinal));
+        Assert.Contains(okS.Notes, n => n.Text.Contains("G_A^xx / G_q / mixed", StringComparison.Ordinal)
+                                     && n.Text.Contains("inside", StringComparison.Ordinal));
 
         // …and past the measured envelope it says PAST, rather than going quiet. 20 mm at 20 GHz is
         // ρ/λ = 1.35, beyond anything L9c's Tier 5 measured for these three components.
@@ -870,8 +870,8 @@ public sealed class MultiLevelPortTests
         var meshB = SurfaceMesher.Mesh(big).Mesh;
         var okB   = PlanarSolve.VerticalRangeVerdict(big, meshB, 20e9);
         Assert.True(okB.Verdict.Ok, "an unmeasured range is a NOTE, not a refusal: " + okB.Verdict.Reason);
-        Assert.Contains(okB.Notes, n => n.Contains("PAST", StringComparison.Ordinal)
-                                     && n.Contains("unmeasured", StringComparison.Ordinal));
+        Assert.Contains(okB.Notes, n => n.Text.Contains("PAST", StringComparison.Ordinal)
+                                     && n.Text.Contains("unmeasured", StringComparison.Ordinal));
 
         Assert.Equal(1.0, Dcim.ValidatedRhoOverLambdaInteriorHorizontal);
         foreach (var n in okB.Notes) _out.WriteLine("  " + n);

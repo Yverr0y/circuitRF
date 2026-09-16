@@ -493,6 +493,66 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Assert.DoesNotContain(r.Notes, n => n.Contains("not ADJACENT in the analysis", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// <b>EM-SEV — the run the user actually had: the plate level left out, and the capacitor gone
+    /// with it.</b>
+    ///
+    /// <para>This is the same artwork and the same technology as
+    /// <see cref="NamingOnlyTheInterconnectLevels_RestoresTheAirbridgePost"/>, which asserts that the
+    /// escape hatch works. It does — and what it COSTS is asserted here, because until EM-SEV the
+    /// cost was reported as three sentences of thirty-five, at the weight of the core count, and a
+    /// user ran it for eleven minutes and got a flat open across the band with no idea why.</para>
+    ///
+    /// <para><b>Three mechanisms remove the capacitor and all three are warnings now</b>
+    /// (R-emsev-1/2/3): the plate's artwork is not meshed, the plate via that joins it to Metal2 is
+    /// discarded, and the patterned film deactivates because its plate is not in the run. The three
+    /// are independent — none is derivable from the others — so all three are checked.</para>
+    ///
+    /// <para><b>The structure is severed, and that is shown from the extracted problem rather than
+    /// from a solve.</b> A raw solve of this shape reads −46 dB, which is an argument about a number;
+    /// what the extraction says is categorical: the two analysis levels are joined by NO via at all,
+    /// and the dielectric that would have coupled them is air. That is what "electrically separate"
+    /// means here, it costs milliseconds, and a solve could not make it stronger.</para>
+    /// </summary>
+    [Fact]
+    public void LeavingThePlateLevelOut_WarnsThreeTimes_AndSeversTheCapacitor()
+    {
+        var r = PlanarExtractor.Extract(
+            SeriesCapacitor(), StarterTechnologies.MmicGaAs(), Dbu, 20e9,
+            new EmExtractionSettings(AnalysisLevelNames: ["Metal1", "Metal2"]));
+
+        Assert.True(r.Ok, r.Refusal);
+        foreach (var w in r.Warnings) output.WriteLine("WARNING  " + w);
+
+        // 1 — the plate's artwork is drawn and not solved, and the warning NAMES the level.
+        Assert.Contains(r.Warnings, w =>
+            w.Contains("carry artwork but are NOT in this", StringComparison.Ordinal) &&
+            w.Contains("'MIM Metal'", StringComparison.Ordinal));
+
+        // 2 — the via the designer drew between the plate and Metal2 is discarded, and the warning
+        //     names the conductor it lands on. (This is the `wrongGround` arm rather than the
+        //     `unknownLevels` one: the plate IS a stackup conductor, it is simply neither an
+        //     analysis level nor the ground reference. R-emsev-2 moved all three arms together
+        //     precisely because which one fires is an accident of the stackup, not of the defect.)
+        Assert.Contains(r.Warnings, w =>
+            w.Contains("via shape(s) span a conductor (MIM Metal)", StringComparison.Ordinal) &&
+            w.Contains("NOT in this answer", StringComparison.Ordinal));
+
+        // 3 — and the film goes to air, which on THIS run is a warning rather than MIM-7's note,
+        //     because the plate it is tied to carries artwork.
+        Assert.Contains(r.Warnings, w =>
+            w.Contains("patterned thin film", StringComparison.Ordinal) &&
+            w.Contains("CARRIES ARTWORK", StringComparison.Ordinal));
+
+        // The structure, not the prose: nothing joins Metal1 to Metal2, and the 12.9 εᵣ film that
+        // would have is air.
+        Assert.Equal(["Metal1", "Metal2"], r.Problem!.Layers.Select(l => l.Name));
+        Assert.Empty(r.Problem!.ViaList);
+        Assert.All(r.Problem!.EffectiveStack.Layers,
+                   l => Assert.True(l.Material.EpsR is 1.0 or 12.9,
+                                    $"the MIM film should be air or GaAs here, not εᵣ={l.Material.EpsR}"));
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // MILESTONE 3 — one raw solve, as a WIRING gate
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -897,6 +957,13 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Assert.Contains("as AIR", note, StringComparison.Ordinal);
         Assert.Contains("'Metal1'", note, StringComparison.Ordinal);
         Assert.DoesNotContain(plain.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+
+        // EM-SEV R-emsev-3 — and on THIS run it stays a NOTE. The plate's absence is correct here:
+        // no artwork was drawn on 'MIM Metal', so the film genuinely is not present and the run is
+        // the module-free one it claims to be. The whole interconnect case must report ZERO
+        // warnings, or the class stops meaning anything on the runs where it does.
+        Assert.Empty(shipped.Warnings);
+        Assert.DoesNotContain(note, shipped.Warnings);
 
         output.WriteLine($"airbridge on the one technology: levels {a.LevelZ(0) * 1e6:G6} / " +
                          $"{a.LevelZ(1) * 1e6:G6} µm, medium {a.EffectiveStack}, kernel accepts");

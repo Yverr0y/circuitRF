@@ -35,10 +35,20 @@ public sealed record PlanarKernelResult(
     PlanarMeshReport                     MeshReport,
     PlanarSolveResult                    Solve,
     IReadOnlyList<PlanarPortResolution>  Ports,
-    IReadOnlyList<string>                Notes,
+    /// <summary>EM-SEV R-emsev-1: every sentence this run produced, each carrying whether it changed
+    /// what was solved. Stored; <see cref="Notes"/> is a view of it.</summary>
+    IReadOnlyList<EmFinding>             Findings,
     /// <summary>D5's heat map, for the one port and one frequency the solve was asked to keep
     /// currents for. Null when none was requested or the sweep produced none.</summary>
-    PlanarCurrentDensityMap?             CurrentDensity = null);
+    PlanarCurrentDensityMap?             CurrentDensity = null)
+{
+    /// <summary>Every finding's text, class discarded — DERIVED, so it cannot drift from
+    /// <see cref="Findings"/>.</summary>
+    public IReadOnlyList<string> Notes => EmFindings.Texts(Findings);
+
+    /// <summary>Just the findings that say the answer is not what was drawn.</summary>
+    public IReadOnlyList<string> Warnings => EmFindings.WarningTexts(Findings);
+}
 
 /// <summary>
 /// Kernel B — the full-wave planar (MoM) solve on one grounded slab (§10.3, phase L8).
@@ -442,12 +452,13 @@ public sealed class PlanarKernel
                                     lengthFormat);
         }
 
-        var notes = new List<string>(report.Notes);
+        var notes = new List<EmFinding>(EmFindings.AsNotes(report.Notes));
         if (severedNote is not null) notes.Add(severedNote);
         if (acceleratorNote is not null) notes.Add(acceleratorNote);
-        notes.AddRange(groundNotes);
-        notes.AddRange(feedNotes);
-        notes.AddRange(sweep.Notes);
+        notes.AddRange(EmFindings.AsNotes(groundNotes));
+        notes.AddRange(EmFindings.AsNotes(feedNotes));
+        // The sweep's own findings keep their class — LevelSeparationNotes' warning rides here.
+        notes.AddRange(sweep.Findings);
         notes.Add(QuasiStaticNote);
 
         PlanarCurrentDensityMap? density = null;

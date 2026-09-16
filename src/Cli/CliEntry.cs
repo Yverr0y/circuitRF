@@ -1330,12 +1330,17 @@ static int RunEm(string[] args)
     // The three lists carry STRINGS, not diagnostics — only the top-level refusal has a coded form
     // (EmRunResult.Diagnostic). Each is wrapped with an id naming which of the three it came from,
     // rather than having arguments invented by parsing the sentence back apart (R-aut1-7).
-    foreach (var n in result.Notes ?? [])
-    { Console.Error.WriteLine($"note: {n}");    JsonRun.Note(CliDiagnostics.EmRunNote(n)); }
-    foreach (var w in result.Warnings)
-    { Console.Error.WriteLine($"warning: {w}"); JsonRun.Note(CliDiagnostics.EmRunWarning(w)); }
+    //
+    // EM-SEV R-emsev-1 — and they are printed WORST FIRST. A run of this shape produces of order
+    // thirty-five lines; a user reading a terminal reads the first few and the last few, and until
+    // now the ones saying part of their circuit was not solved were somewhere in the middle at the
+    // weight of the core count. Grouping is only half the answer — the order is the other half.
     foreach (var e in result.Errors ?? [])
     { Console.Error.WriteLine($"error: {e}");   JsonRun.Note(CliDiagnostics.EmRunError(e)); }
+    foreach (var w in result.Warnings)
+    { Console.Error.WriteLine($"warning: {w}"); JsonRun.Note(CliDiagnostics.EmRunWarning(w)); }
+    foreach (var n in result.Notes ?? [])
+    { Console.Error.WriteLine($"note: {n}");    JsonRun.Note(CliDiagnostics.EmRunNote(n)); }
 
     // R-emcli-8 — a refusal stays a refusal. Each status carries a written explanation of what is
     // wrong with THIS setup; collapsing them into "EM failed" throws away the only part a user can

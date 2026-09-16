@@ -284,7 +284,7 @@ public sealed class EmRunProgressTests
             UnknownCount  = 0,
             StandardCount = 0,
             CoreBuildMs   = 0,
-            Notes         = [],
+            Findings         = [],
             SolvedPointCount  = 27,
             SolvedFrequencies = [.. Enumerable.Range(0, 27).Select(i => 1e9 + i * 1e8)],
         };
@@ -317,7 +317,7 @@ public sealed class EmRunProgressTests
             UnknownCount  = 0,
             StandardCount = 0,
             CoreBuildMs   = 0,
-            Notes         = [],
+            Findings         = [],
             SolvedPointCount  = 51,
             SolvedFrequencies = [.. Enumerable.Range(0, 51).Select(i => 5e8 + i * 1.9e8)],
         };

@@ -249,7 +249,8 @@ public class PortSeededLevelsTests
 
         Assert.True(r.Ok, r.Refusal);
 
-        var warn = r.Notes.FirstOrDefault(n => n.StartsWith("WARNING:", StringComparison.Ordinal));
+        // EM-SEV R-emsev-1: the CLASS, not a prefix in the prose.
+        var warn = r.Warnings.FirstOrDefault();
         Assert.NotNull(warn);
         Assert.Contains($"'{conds[1].Name}'", warn, StringComparison.Ordinal);
         Assert.Contains("absorbed into the surrounding dielectric", warn, StringComparison.Ordinal);
@@ -268,6 +269,6 @@ public class PortSeededLevelsTests
         var r = PlanarExtractor.Extract([Patch(top), Port(top, 0, 15000)], tech, Dbu);
 
         Assert.True(r.Ok, r.Refusal);
-        Assert.DoesNotContain(r.Notes, n => n.StartsWith("WARNING:", StringComparison.Ordinal));
+        Assert.Empty(r.Warnings);
     }
 }

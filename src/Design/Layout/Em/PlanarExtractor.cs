@@ -45,20 +45,42 @@ public sealed record PlanarReturnPlane(string? ConductorName, double TopM, bool 
 /// <summary>Either a <see cref="PlanarProblem"/>, or a refusal that names what is missing and where
 /// the capability arrives — the same R-mom-17 shape every other refusal in this area uses.</summary>
 public sealed record PlanarExtractionResult(
-    PlanarProblem?        Problem,
-    string?               Refusal,
-    IReadOnlyList<string> Notes,
-    PlanarReturnPlane?    ReturnPlane = null)
+    PlanarProblem?           Problem,
+    string?                  Refusal,
+    /// <summary>EM-SEV R-emsev-1: every sentence this extraction produced, each carrying the one
+    /// thing the reader needs before the words — whether it changed what was solved. This is the
+    /// STORED list; <see cref="Notes"/> is a view of it.</summary>
+    IReadOnlyList<EmFinding> Findings,
+    PlanarReturnPlane?       ReturnPlane = null)
 {
     public bool Ok => Problem is not null && Refusal is null;
 
-    public static PlanarExtractionResult No(string refusal, IEnumerable<string>? notes = null)
-        => new(null, refusal, notes is null ? [] : [.. notes]);
+    /// <summary>Every finding's text, class discarded — the spelling this result carried before
+    /// EM-SEV, and the one the panel and the gates read. <b>Derived, never stored</b>: a second
+    /// stored list is a list that drifts.</summary>
+    public IReadOnlyList<string> Notes => EmFindings.Texts(Findings);
 
-    public static PlanarExtractionResult Yes(PlanarProblem p, IEnumerable<string>? notes = null,
+    /// <summary>Just the ones that say the answer is not what was drawn.</summary>
+    public IReadOnlyList<string> Warnings => EmFindings.WarningTexts(Findings);
+
+    public static PlanarExtractionResult No(string refusal, IEnumerable<EmFinding>? findings = null)
+        => new(null, refusal, findings is null ? [] : [.. findings]);
+
+    public static PlanarExtractionResult Yes(PlanarProblem p, IEnumerable<EmFinding>? findings = null,
                                              PlanarReturnPlane? returnPlane = null)
-        => new(p, null, notes is null ? [] : [.. notes], returnPlane);
+        => new(p, null, findings is null ? [] : [.. findings], returnPlane);
 }
+
+/// <summary>What <see cref="PlanarExtractor.SurveyArtwork"/> found in a layout, by stackup entry
+/// NAME — the identity a <c>.cem</c>'s analysis-level list is written in, so the two can be compared
+/// without resolving anything.</summary>
+/// <param name="ConductorsWithArtwork">Conductor entries this layout draws filled artwork on.</param>
+/// <param name="ConductorsDrawnViasSpan">Conductor entries a drawn via's stackup entry names as one
+/// of its two ends. A via landing on a level the run excludes is a connection the designer STATED
+/// and the answer does not contain.</param>
+public sealed record EmArtworkSurvey(
+    IReadOnlySet<string> ConductorsWithArtwork,
+    IReadOnlySet<string> ConductorsDrawnViasSpan);
 
 public static class PlanarExtractor
 {
@@ -143,7 +165,7 @@ public static class PlanarExtractor
         ArgumentNullException.ThrowIfNull(tech);
         settings ??= EmExtractionSettings.Default;
 
-        var notes = new List<string>();
+        var notes = new List<EmFinding>();
 
         if (dbuPerMicron <= 0)
             return PlanarExtractionResult.No(
@@ -442,11 +464,17 @@ public static class PlanarExtractor
             .Where(b => !levelIndices.Contains(b.Index) && !incidentalIdx.Contains(b.Index))
             .ToList();
         string levelList = string.Join(", ", levels.Select(b => $"'{b.Layer.Name}'"));
+        //
+        // EM-SEV R-emsev-1: a WARNING. Artwork that is drawn and not solved is the definition of
+        // "the answer is not what was drawn", and it is the single line that would have told the
+        // designer of the MIM capacitor what had happened to it.
         if (dropped.Count > 0)
-            notes.Add($"{dropped.Count} signal conductor layer(s) carry artwork but are NOT in this " +
-                      $"EM setup's analysis levels ({levelList}). " +
+            notes.Add(EmFinding.Warn(
+                      $"{dropped.Count} signal conductor layer(s) carry artwork but are NOT in this " +
+                      $"EM setup's analysis levels ({levelList}): " +
+                      $"{string.Join(", ", dropped.Select(b => $"'{b.Layer.Name}'"))}. " +
                       "Their shapes are not meshed and contribute nothing to the answer. Add them to " +
-                      "the setup's level list if they are part of the structure.");
+                      "the setup's level list if they are part of the structure."));
 
         // ── MIM-7 — a PATTERNED dielectric enters the medium only when its plate is analysed ──
         //
@@ -456,8 +484,13 @@ public static class PlanarExtractor
         // gives its sheet back to the bottom of its band), so the stack is REBUILT rather than
         // patched, and every band already in hand is re-resolved by its stackup index.
         var analysed = levels.Select(b => b.Layer.Name).ToHashSet(StringComparer.Ordinal);
+        // EM-SEV R-emsev-3 — the extractor knows BOTH halves, so the finding can be split on the
+        // one that matters: `analysed` is what this run solves, `signalBands` is what the layout
+        // actually draws on. A plate with no artwork is MIM-7's own case and stays a note; a plate
+        // that is drawn and excluded is a capacitor missing from the answer.
+        var drawnOn = signalBands.Select(b => b.Layer.Name).ToHashSet(StringComparer.Ordinal);
         var effectiveStackup = PatternedDielectric.Deactivate(
-            tech.Stackup, analysed.Contains, revertSheetSurface: true, notes);
+            tech.Stackup, analysed.Contains, revertSheetSurface: true, notes, drawnOn.Contains);
         if (effectiveStackup is not null)
         {
             stack  = BuildStack(effectiveStackup);
@@ -525,15 +558,15 @@ public static class PlanarExtractor
                     .ToList();
 
                 if (blockers.Count > 0)
-                    notes.Add(
-                        $"WARNING: the analysis levels ({levelList}) sit BELOW every plane they could " +
+                    notes.Add(EmFinding.Warn(
+                        $"The analysis levels ({levelList}) sit BELOW every plane they could " +
                         "return through, which this run would normally solve by mirroring the whole " +
                         $"stack — but {string.Join(", ", blockers)} " +
                         $"{(blockers.Count == 1 ? "carries a reference-surface or patterned-film tie" : "carry reference-surface or patterned-film ties")} " +
                         "written in the stackup's own orientation, and reflecting those is a " +
                         "modelling decision rather than an arithmetic one. The stack was left as " +
                         "authored, so the note below applies and the plane it names is not the one " +
-                        "this structure is referenced to.");
+                        "this structure is referenced to."));
                 else
                 {
                     string wouldHave = directOk
@@ -782,8 +815,8 @@ public static class PlanarExtractor
                 .OrderBy(b => b.TopM)
                 .ToList();
             if (skipped.Count > 0)
-                notes.Add(
-                    $"WARNING: {string.Join(", ", skipped.Select(b => $"'{b.Layer.Name}'"))} " +
+                notes.Add(EmFinding.Warn(
+                    $"{string.Join(", ", skipped.Select(b => $"'{b.Layer.Name}'"))} " +
                     $"{(skipped.Count == 1 ? "is a ground-designated conductor" : "are ground-designated conductors")} " +
                     $"lying BETWEEN the analysis levels and the return plane chosen above. A return " +
                     "plane must sit beneath the conductor it feeds, and this one does not, so it was " +
@@ -793,7 +826,7 @@ public static class PlanarExtractor
                     "the answer will be wrong by the ratio of the two heights and will not look it. " +
                     "Restrict this EM setup's analysis levels to the conductors above that plane, or " +
                     "untick its \"Ground reference\" in the technology editor so it is meshed as " +
-                    "ordinary metal.");
+                    "ordinary metal."));
         }
         else if (bottomBoundary == BoundaryCondition.Ground)
         {
@@ -1203,8 +1236,8 @@ public static class PlanarExtractor
             .OrderBy(b => b.BottomM)
             .ToList();
         if (covers.Count > 0)
-            notes.Add(
-                $"WARNING: {string.Join(", ", covers.Select(b => $"'{b.Layer.Name}'"))} " +
+            notes.Add(EmFinding.Warn(
+                $"{string.Join(", ", covers.Select(b => $"'{b.Layer.Name}'"))} " +
                 $"{(covers.Count == 1 ? "is a dielectric layer" : "are dielectric layers")} lying " +
                 $"ABOVE '{levels[^1].Layer.Name}', the topmost analysis level, and " +
                 $"{(covers.Count == 1 ? "it is NOT in this solve" : "they are NOT in this solve")}. " +
@@ -1214,7 +1247,7 @@ public static class PlanarExtractor
                 "answer for an UNCOVERED structure, and it will not look any different. On a patch " +
                 "antenna a real cover moves the resonance by per cent and changes the surface-wave " +
                 "launch. Remove the layer from the stackup if you did not mean it, and read the " +
-                "published resonance as the uncovered one if you did.");
+                "published resonance as the uncovered one if you did."));
 
         var conductorLayers = new PlanarConductorLayer[levels.Count];
         for (int i = 0; i < levels.Count; i++)
@@ -1774,7 +1807,7 @@ public static class PlanarExtractor
     private static List<PlanarVia> BuildVias(
         List<(ViaShape Shape, StackupLayer Entry)> viaShapes,
         List<(PlanarPolygon Poly, StackupLayer Entry)> regionViaPolys,
-        List<Band> levels, double perDbu, List<string> notes, Band? groundBand = null,
+        List<Band> levels, double perDbu, List<EmFinding> notes, Band? groundBand = null,
         List<Band>? stack = null, PlaneMetal? planeMetal = null,
         Func<int, IReadOnlyList<PlanarPolygon>>? farMetal = null,
         IReadOnlyList<PlanarPolygon>[]? levelPolys = null)
@@ -2016,12 +2049,12 @@ public static class PlanarExtractor
         // reasoning behind it is in this file and in RESOLVED.md, which is where reasoning belongs;
         // resist restating it here, because every clause added costs the sentence that matters.
         if (carriedAway > 0)
-            notes.Add(
-                $"WARNING: {carriedAway} via(s) join '{levels[crossedLevel].Layer.Name}' to " +
+            notes.Add(EmFinding.Warn(
+                $"{carriedAway} via(s) join '{levels[crossedLevel].Layer.Name}' to " +
                 $"'{crossedName}' without touching '{groundBand!.Layer.Name}'. These are signal " +
                 "vias, not stitches: they are NOT modelled, so the structure continues where these " +
                 "s-parameters stop. Solve the other side as its own run and join them there, or " +
-                "analyse a region these vias do not leave.");
+                "analyse a region these vias do not leave."));
 
         if (toGround > 0)
             notes.Add($"{toGround} of them are BACKSIDE vias, running from a signal level down to " +
@@ -2029,13 +2062,27 @@ public static class PlanarExtractor
                       "infinite conductor the Green's function handles analytically rather than a " +
                       "meshed level, so each is a half (attachment) basis whose return charge is the " +
                       "plane's own image.");
+        // ── EM-SEV R-emsev-2 — A DISCARDED VIA IS A WARNING, and this is the least ambiguous
+        //    finding in the whole area. A designer who DREW a via stated a connection; dropping it
+        //    severs that connection, and the answer published is for a structure in more pieces than
+        //    the one on screen. On the design that prompted EM-SEV this single line was the
+        //    difference between an inductor in series with a capacitor and two disconnected islands
+        //    of metal — reported, correctly worded, in the same breath and at the same weight as the
+        //    core count.
+        //
+        //    All three of these say the same thing with different reasons for it, so all three move
+        //    together. The legitimate ground-pour case above (`stitched`/`toGround`) stays a note:
+        //    there the run made a decision and made it right.
         if (wrongGround > 0)
-            notes.Add($"{wrongGround} via shape(s) span a conductor ({string.Join(", ", wrongGroundNames)}) " +
+            notes.Add(EmFinding.Warn(
+                      $"{wrongGround} via shape(s) span a conductor ({string.Join(", ", wrongGroundNames)}) " +
                       "that is neither an analysis level nor the ground plane this kernel models, and " +
-                      "were ignored. The only non-meshed conductor a via may terminate on is the " +
+                      "were ignored — so a connection you drew is NOT in this answer. The only " +
+                      "non-meshed conductor a via may terminate on is the " +
                       "ground reference R-em-4 resolves — a different ground pour is a finite " +
                       "conductor this kernel does not mesh, and treating it as the infinite plane " +
-                      "would solve a structure you did not draw.");
+                      "would solve a structure you did not draw. Add that conductor to this EM " +
+                      "setup's analysis levels to model the connection."));
 
         if (pointVias > 0)
             notes.Add($"{pointVias} via(s) were extracted. Each round barrel is replaced by the " +
@@ -2052,14 +2099,17 @@ public static class PlanarExtractor
                       "case. Nothing is squared: the equal-area substitution applies to a round " +
                       "barrel, and a drawn outline already is the footprint.");
         if (noSpan > 0)
-            notes.Add($"{noSpan} via shape(s) were ignored because their stackup via entry names no " +
+            notes.Add(EmFinding.Warn(
+                      $"{noSpan} via shape(s) were ignored because their stackup via entry names no " +
                       "SpanFrom/SpanTo conductors. Which two levels a via joins is a property of the " +
                       "process, not of the drawing — set the span in the technology editor's Stackup " +
                       "tab. Ignoring it is safer than guessing: a via joining the wrong pair of " +
-                      "levels renders perfectly and solves to a wrong answer.");
+                      "levels renders perfectly and solves to a wrong answer."));
         if (unknownLevels > 0)
-            notes.Add($"{unknownLevels} via shape(s) span conductors that are not among this EM " +
-                      "setup's analysis levels, and were ignored.");
+            notes.Add(EmFinding.Warn(
+                      $"{unknownLevels} via shape(s) span conductors that are not among this EM " +
+                      "setup's analysis levels, and were ignored — the connection they draw is not " +
+                      "in this answer. Add those conductors to the analysis levels."));
         if (notAdjacent > 0)
             notes.Add($"{notAdjacent} via shape(s) span two levels that are not ADJACENT in the " +
                       "analysis. A vertical basis pairs a cell with the cell directly above it, so a " +
@@ -2324,6 +2374,60 @@ public static class PlanarExtractor
             foreach (var key in l.DrawingLayers) map.TryAdd(key, l);
         }
         return map;
+    }
+
+    /// <summary>
+    /// <b>EM-SEV R-emsev-6 — which conductor entries this layout actually DRAWS on, and which ones
+    /// its drawn vias land on.</b> No stackup arithmetic, no ports, no mesh: just the two sets a
+    /// panel needs to say <i>"'MIM Metal' carries artwork in this layout and is not ticked"</i>
+    /// while the dialog is open, rather than after an eleven-minute solve has published the answer
+    /// without it.
+    ///
+    /// <para><b>It lives HERE, next to the binding it reads</b>, and not in the view model. How a
+    /// drawing layer binds to a stackup entry is this file's rule — including the two traps a second
+    /// copy would miss: a via entry's drawing layer is never in the conductor binding (BuildStack
+    /// skips every Via entry), and a NON-PLATED via entry is a hole rather than metal and binds to
+    /// nothing at all.</para>
+    ///
+    /// <para>A label or a bitmap is annotation and counts as nothing, exactly as the extraction
+    /// treats it.</para>
+    /// </summary>
+    public static EmArtworkSurvey SurveyArtwork(IReadOnlyList<LayoutShape> shapes, Technology tech)
+    {
+        ArgumentNullException.ThrowIfNull(shapes);
+        ArgumentNullException.ThrowIfNull(tech);
+
+        var drawnOn    = new HashSet<string>(StringComparer.Ordinal);
+        var viaLands   = new HashSet<string>(StringComparer.Ordinal);
+        var binding    = BuildLayerBinding(BuildStack(tech.Stackup));
+        var viaBinding = BuildViaBinding(tech.Stackup, out _);
+
+        foreach (var s in shapes)
+        {
+            if (s is LabelShape or BitmapShape) continue;
+
+            if (s is ViaShape vs)
+            {
+                if (viaBinding.TryGetValue(vs.Layer, out var viaEntry)) AddSpan(viaEntry);
+                continue;
+            }
+
+            // A region on a via-bound drawing layer is a via FOOTPRINT (MIM-1) — a plate connection
+            // is a rectangle, not a point — so it says the same thing about the levels it joins.
+            if (viaBinding.TryGetValue(s.Layer, out var regionEntry)) { AddSpan(regionEntry); continue; }
+
+            if (!binding.TryGetValue(s.Layer, out var bands)) continue;
+            foreach (var b in bands)
+                if (b.Layer.Kind == StackupKind.Conductor) drawnOn.Add(b.Layer.Name);
+        }
+
+        return new EmArtworkSurvey(drawnOn, viaLands);
+
+        void AddSpan(StackupLayer entry)
+        {
+            if (entry.SpanFromLayer is { Length: > 0 } from) viaLands.Add(from);
+            if (entry.SpanToLayer   is { Length: > 0 } to)   viaLands.Add(to);
+        }
     }
 
     private static Dictionary<LayerKey, List<Band>> BuildLayerBinding(List<Band> stack)

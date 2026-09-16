@@ -360,7 +360,10 @@ public sealed class ReturnPlaneOverrideTests : IDisposable
             [Patch(top), Port(top, 0, 15000)], tech, Dbu, 10e9, Ground(conds[3].Name));
 
         Assert.True(r.Ok, r.Refusal);
-        var warning = r.Notes.FirstOrDefault(n => n.StartsWith("WARNING:", StringComparison.Ordinal));
+        // EM-SEV R-emsev-1: asked of the CLASS, not of a "WARNING: " prefix the sentence used to
+        // carry — nothing downstream could read a prefix it was not told about, which is why the
+        // class is data now.
+        var warning = r.Warnings.FirstOrDefault();
         Assert.NotNull(warning);
         Assert.Contains($"'{conds[1].Name}'", warning, StringComparison.Ordinal);   // Inner 1
         Assert.Contains("modelled as substrate", warning, StringComparison.Ordinal);
