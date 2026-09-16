@@ -451,15 +451,22 @@ public class MimCapacitorTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// <b>The stated consequence of adding a level between Metal1 and Metal2: an airbridge post no
-    /// longer joins two ADJACENT analysis levels.</b> With MIM Metal in the level list, the
-    /// Metal1-Metal2 Post spans levels 0 and 2 and is dropped with the extractor's own
-    /// <c>notAdjacent</c> note — so an EM setup either excludes MIM Metal, or does not mix airbridge
-    /// posts with capacitor plates. Documented with the technology; asserted here so it stays a
-    /// reported drop rather than becoming a silent one.
+    /// <b>An airbridge post and a capacitor plate in ONE run — the case that had no legal setting.</b>
+    ///
+    /// <para>Adding MIM Metal to the level list is what puts a level BETWEEN Metal1 and Metal2, so
+    /// the Metal1-Metal2 Post spans levels 0 and 2. It used to be dropped, and this file used to
+    /// assert that drop and call the two-level list an escape hatch. It is not one: the shipped
+    /// spiral's underpass is two such posts and the shipped MIM capacitor draws one of its own, so
+    /// on this technology the choice was a capacitor with no inductor or an inductor with no
+    /// capacitor. A user's L-C resonator solved as a flat open either way.</para>
+    ///
+    /// <para>The barrel is now built as a CHAIN — one vertical basis per gap, with the post's own
+    /// cross-section carried onto each level it passes through, which is what a post passing through
+    /// that height physically is. Three via records here: the plate via, and the post's two halves.
+    /// No warning, because nothing was dropped.</para>
     /// </summary>
     [Fact]
-    public void AnAirbridgePost_IsNotAdjacentOnceMimMetalIsAnAnalysisLevel()
+    public void AnAirbridgePost_ChainsThroughMimMetalRatherThanBeingDropped()
     {
         var shapes = SeriesCapacitor();
         shapes.Add(Rect(Post, 40, 22, 46, 28));
@@ -469,14 +476,27 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Assert.True(r.Ok, r.Refusal);
 
         Assert.Equal(3, r.Problem!.Layers.Count);
-        Assert.Single(r.Problem!.ViaList);              // the plate via only; the post was dropped
-        Assert.Contains(r.Notes, n => n.Contains("not ADJACENT in the analysis", StringComparison.Ordinal));
+
+        // The plate via (MIM Metal -> Metal2) plus the post's two gaps.
+        Assert.Equal(3, r.Problem!.ViaList.Count);
+        Assert.Equal(2, r.Problem!.ViaList.Count(v => v.LowerLayerIndex == 1 && v.UpperLayerIndex == 2));
+        Assert.Single(r.Problem!.ViaList, v => v.LowerLayerIndex == 0 && v.UpperLayerIndex == 1);
+
+        // The intervening level carries the barrel's footprint: the top plate, plus the post.
+        var mim = r.Problem!.Layers[1];
+        Assert.Equal("MIM Metal", mim.Name);
+        Assert.Equal(2, mim.Polygons.Count);
+
+        Assert.Empty(r.Warnings);
+        Assert.Contains(r.Notes, n => n.Contains("built as a CHAIN", StringComparison.Ordinal));
     }
 
-    /// <summary>…and the escape hatch works: naming only Metal1 and Metal2 as analysis levels puts
-    /// the post back, at the cost of the capacitor plate not being in that run.</summary>
+    /// <summary>…and naming only Metal1 and Metal2 still gives the post a single basis, unchanged —
+    /// the two-level path is the one every existing gate runs on and the chain must not reach it.
+    /// The capacitor plate is not in that run, which is now a choice rather than the only option.
+    /// </summary>
     [Fact]
-    public void NamingOnlyTheInterconnectLevels_RestoresTheAirbridgePost()
+    public void NamingOnlyTheInterconnectLevels_KeepsTheAirbridgePostOnOneBasis()
     {
         var shapes = SeriesCapacitor();
         shapes.Add(Rect(Post, 40, 22, 46, 28));

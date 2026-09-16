@@ -1249,16 +1249,6 @@ public static class PlanarExtractor
                 "launch. Remove the layer from the stackup if you did not mean it, and read the " +
                 "published resonance as the uncovered one if you did."));
 
-        var conductorLayers = new PlanarConductorLayer[levels.Count];
-        for (int i = 0; i < levels.Count; i++)
-            conductorLayers[i] = new PlanarConductorLayer(
-                levels[i].Layer.Name, polysByLevel[i], levels[i].Layer.SigmaSm,
-                levels[i].TopM - levels[i].BottomM,
-                // A one-level problem keeps ZM UNSET, so it stays on L8's shipped path bit-for-bit
-                // (PlanarProblem.RequiresGeneralKernel). Naming the height is what turns the general
-                // kernel on, and it must only happen when there is something general to say.
-                levels.Count > 1 ? levelZ[i] : double.NaN);
-
         // GVIA-1 — the plane's own artwork, classified once, is what tells a ground stitch from a
         // signal via passing through. It is built from the SAME polygons R-fg-2 reads above, so the
         // copper a via is tested against is the copper the run reports the size of.
@@ -1302,6 +1292,20 @@ public static class PlanarExtractor
 
         var vias = BuildVias(viaShapes, regionViaPolys, levels, perDbu, notes, groundBand,
                              stack, planeMetal, FarMetal, polysByLevel);
+
+        // The conductor levels are built AFTER the vias, because a via that spans a level builds
+        // that level's metal: see BuildVias' chain-through block, which appends the barrel's own
+        // cross-section to `polysByLevel` for each level it passes. Nothing else here reorders — a
+        // run with no spanning via produces the identical array either way.
+        var conductorLayers = new PlanarConductorLayer[levels.Count];
+        for (int i = 0; i < levels.Count; i++)
+            conductorLayers[i] = new PlanarConductorLayer(
+                levels[i].Layer.Name, polysByLevel[i], levels[i].Layer.SigmaSm,
+                levels[i].TopM - levels[i].BottomM,
+                // A one-level problem keeps ZM UNSET, so it stays on L8's shipped path bit-for-bit
+                // (PlanarProblem.RequiresGeneralKernel). Naming the height is what turns the general
+                // kernel on, and it must only happen when there is something general to say.
+                levels.Count > 1 ? levelZ[i] : double.NaN);
 
         // MIM-4 — a STRATIFIED medium turns the general kernel on even at one level. Before this
         // brief that case could not arise: a stratified region under the lowest level was refused at
@@ -1810,7 +1814,7 @@ public static class PlanarExtractor
         List<Band> levels, double perDbu, List<EmFinding> notes, Band? groundBand = null,
         List<Band>? stack = null, PlaneMetal? planeMetal = null,
         Func<int, IReadOnlyList<PlanarPolygon>>? farMetal = null,
-        IReadOnlyList<PlanarPolygon>[]? levelPolys = null)
+        List<PlanarPolygon>[]? levelPolys = null)
     {
         var vias = new List<PlanarVia>();
         if (viaShapes.Count == 0 && regionViaPolys.Count == 0) return vias;
@@ -1820,6 +1824,7 @@ public static class PlanarExtractor
         // notes firing said "266 vias go to the plane" twice in a row, which is exactly the noise
         // that makes a run's notes unread (owner, 2026-09-12).
         int noSpan = 0, unknownLevels = 0, notAdjacent = 0, toGround = 0, wrongGround = 0;
+        int chained = 0, chainedLevels = 0;
         int pointVias = 0, regionVias = 0, regionPolys = 0;
         int stitched = 0, passedThrough = 0, carriedAway = 0;
         var wrongGroundNames = new List<string>();
@@ -1907,8 +1912,49 @@ public static class PlanarExtractor
 
             lower = Math.Min(a, b2);
             upper = Math.Max(a, b2);
-            if (upper != lower + 1) { notAdjacent += count; return ViaSpan.Rejected; }
+
+            // ── A VIA THAT SPANS A LEVEL IS A CHAIN OF VIAS, AND THE EXTRACTOR BUILDS IT ───────
+            //
+            // The vertical basis pairs a cell with the cell DIRECTLY above it, so a barrel from
+            // level i to level i+2 has no single basis to live on. Until now it was dropped, and on
+            // the shipped MMIC technology that is not an edge case: ticking 'MIM Metal' to model a
+            // capacitor is exactly what puts a level between Metal1 and Metal2, and every
+            // Metal1-Metal2 post in the design — a spiral's underpass, the MIM capacitor's own
+            // output via — went with it. There was no setting that solved both halves at once.
+            //
+            // THE INTERVENING LEVEL'S METAL IS THE BARREL ITSELF. A post passing through z is
+            // conducting metal at z, of exactly the barrel's cross-section, and `AddChain` below
+            // puts that footprint on each level it passes before emitting one via per gap. This
+            // invents nothing: it states the cross-section the drawn via already has at a height
+            // the analysis happens to sample. If the intervening level carries its own metal there,
+            // the post genuinely shorts to it — which is what the artwork says and what a real
+            // process would build.
+            //
+            // It cannot change a span that resolves today: `upper == lower + 1` takes the same
+            // single-via path it always has, and every existing gate is on that path.
+            if (upper != lower + 1)
+            {
+                if (levelPolys is null) { notAdjacent += count; return ViaSpan.Rejected; }
+                chained += count;
+                chainedLevels = Math.Max(chainedLevels, upper - lower - 1);
+            }
             return ViaSpan.Fixed;
+        }
+
+        // One PlanarVia per GAP, and the barrel's own cross-section on every level it passes
+        // through. `lower` may be PlanarVia.GroundTerminal, which is not a level index and never
+        // spans — the ground paths above return before the adjacency test, so `upper == lower + 1`
+        // holds for them and this degenerates to the single Add it replaced.
+        void AddSpan(int lo, int hi, List<PlanarPolygon> footprints, double sigmaSm)
+        {
+            if (lo == PlanarVia.GroundTerminal || hi == lo + 1)
+            {
+                vias.Add(new PlanarVia(lo, hi, footprints, sigmaSm));
+                return;
+            }
+            for (int i = lo + 1; i < hi; i++) levelPolys![i].AddRange(footprints);
+            for (int i = lo; i < hi; i++)
+                vias.Add(new PlanarVia(i, i + 1, footprints, sigmaSm));
         }
 
         // ── GVIA-2 — a via that bypasses the plane: does it CARRY THE STRUCTURE AWAY? ─────────
@@ -1954,10 +2000,10 @@ public static class PlanarExtractor
                 stitched++;
             }
 
-            vias.Add(new PlanarVia(lower, upper,
+            AddSpan(lower, upper,
                 [new PlanarPolygon([new EmPoint(cx - half, cy - half), new EmPoint(cx + half, cy - half),
                                     new EmPoint(cx + half, cy + half), new EmPoint(cx - half, cy + half)])],
-                entry.SigmaSm));
+                entry.SigmaSm);
             pointVias++;
         }
 
@@ -2010,7 +2056,7 @@ public static class PlanarExtractor
             }
             else footprints = [.. group.Select(g => g.Poly)];
 
-            vias.Add(new PlanarVia(lower, upper, footprints, entry.SigmaSm));
+            AddSpan(lower, upper, footprints, entry.SigmaSm);
             regionVias++;
             regionPolys += shapeCount;
         }
@@ -2110,11 +2156,30 @@ public static class PlanarExtractor
                       $"{unknownLevels} via shape(s) span conductors that are not among this EM " +
                       "setup's analysis levels, and were ignored — the connection they draw is not " +
                       "in this answer. Add those conductors to the analysis levels."));
+        // EM-SEV R-emsev-2, the fourth member its own text did not enumerate. It makes the
+        // IDENTICAL claim to the three above — a connection the designer drew is not in the answer —
+        // and it is the one that fires on the shipped MMIC technology, because adding 'MIM Metal' to
+        // the level list is exactly what puts a level between Metal1 and Metal2 and drops every
+        // Metal1-Metal2 post in the structure. A spiral's underpass and the shipped MIM capacitor's
+        // own output via are both posts, so on that technology the user is told that half their
+        // circuit was deleted at the weight of the core count, in the very run they added the plate
+        // level to FIX the other half. Warning, for the reason the other three are.
+        if (chained > 0)
+            notes.Add($"{chained} via shape(s) span {(chainedLevels == 1 ? "a level" : "levels")} " +
+                      "between their two terminals and were built as a CHAIN — one vertical basis " +
+                      "per gap, with the barrel's own cross-section carried onto each level it " +
+                      "passes through. A vertical basis pairs a cell with the cell directly above " +
+                      "it, so a post from Metal1 to Metal2 across an intervening plate level is " +
+                      "several vias, not one. The connection you drew IS in this answer.");
         if (notAdjacent > 0)
-            notes.Add($"{notAdjacent} via shape(s) span two levels that are not ADJACENT in the " +
-                      "analysis. A vertical basis pairs a cell with the cell directly above it, so a " +
-                      "stacked via is a chain of vias — give one via entry per gap, or include the " +
-                      "intervening level in the analysis.");
+            notes.Add(EmFinding.Warn(
+                      $"{notAdjacent} via shape(s) span two levels that are not ADJACENT in the " +
+                      "analysis and were ignored — so a connection you drew is NOT in this answer. " +
+                      "A vertical basis pairs a cell with the cell directly above it, so a " +
+                      "stacked via is a chain of vias — give one via entry per gap, or REMOVE the " +
+                      "intervening level from the analysis. Note that removing it is not always " +
+                      "available: a level carrying artwork of its own cannot be dropped without " +
+                      "deleting that artwork from the answer too."));
 
         return vias;
     }

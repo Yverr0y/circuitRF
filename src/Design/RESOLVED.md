@@ -6244,3 +6244,66 @@ visible to `CircuitRF.Ui`.
 twenty times; `NetExtractor`'s own `CellScope` is what stops the elaborated library gaining twenty
 copies of it. A cache here would need invalidating by something, and a one-shot process has nothing
 to invalidate it with.
+## A via that spans a level was dropped, and the MMIC level list had no legal setting (2026-09-15)
+
+A design built from the shipped MMIC PCells — a `KIT_SPIRAL` in series with a `KIT_MIMCAP` — solved
+as a flat open at every frequency, before and after EM-SEV and MIM-8 landed. Both briefs worked as
+written; neither could change the number, and the reason is worth recording because it is not a bug
+in either of them.
+
+**There is no setting of `AnalysisLevelNames` that solves this structure on
+`mmic-GaAs_2LM_100um`.** The technology has three signal conductors (Metal1 at z=103, MIM Metal at
+103.2, Metal2 at 106) and two posts that matter: `Metal1-Metal2 Post` (drawing layer 3) and `MIM Via`
+(layer 10, MIM Metal → Metal2).
+
+| levels | capacitor | Metal1↔Metal2 posts | result |
+|---|---|---|---|
+| `Metal1, Metal2` | plate excluded — gone | ok | open, \|S21\| ≈ 0.003 |
+| `Metal1, MIM Metal, Metal2` | ok | **non-adjacent — all dropped** | open, \|S21\| ≈ 0.0035 |
+
+Adding the plate level is what puts a level BETWEEN Metal1 and Metal2, and `BuildVias` drops a via
+whose two levels are not adjacent in the analysis. The spiral's underpass is two such posts, and the
+shipped MIM capacitor draws one of its own — `kit.py`'s cap bridges up to Metal2 and back down to
+Metal1 so both of its terminals abut on one layer. So the capacitor cannot be modelled without
+deleting the inductor, and vice versa. Measured, not reasoned: 24 via cells on the two-level run,
+4 on the three-level one.
+
+`MimCapacitorTests.AnAirbridgePost_IsNotAdjacentOnceMimMetalIsAnAnalysisLevel` already stated the
+limitation and called the two-level list an escape hatch. It is not one when the excluded level
+carries artwork — that is the case EM-SEV's own warning exists to name.
+
+**What changed here:** `notAdjacent` is now `EmFinding.Warn`, the fourth member of the group
+R-emsev-2 enumerated as three. It makes the identical claim to `wrongGround`, `noSpan` and
+`unknownLevels` — a connection the designer drew is not in the answer — and on this technology it is
+the one that fires on every real MMIC. Its sentence now says so, and says that dropping the
+intervening level is not always available.
+
+**And then the drop itself was fixed.** A post whose intervening level carries no metal at its own
+footprint is an uninterrupted barrel, so `BuildVias` now builds it as a CHAIN: one `PlanarVia` per
+gap, with the barrel's own cross-section appended to `polysByLevel` for each level it passes. That
+invents no metal — it states the cross-section the drawn via already has at a height the analysis
+happens to sample; where the intervening level carries its own metal there, the post genuinely
+shorts to it, which is what the artwork says. `conductorLayers` is built AFTER `BuildVias` for this
+reason. Strictly additive: `upper == lower + 1` takes the identical single-via path, so every run
+that resolved before is bit-identical, and the warning above remains for a span that cannot chain.
+The `notAdjacent`-is-a-warning change stands for that residual case.
+
+**The dropped posts were one of THREE independent breaks, and the investigation got the other two
+wrong before it got them right.** Recorded because the method is the lesson, not the file.
+
+1. An **80 nm gap** between the capacitor's output lead (x = -185.080) and the abutting MLIN
+   (x = -185.000). First called harmless: the gap was closed, the structure re-solved, and the answer
+   did not move. That test proved nothing — the via posts were still being dropped, so BOTH sides of
+   the comparison were already open. Retested once the chain landed, it is worth **40 dB**:
+   |S21| goes from -42 dB to -1.7 dB. A conclusion drawn while a known larger fault is in the circuit
+   is not a measurement.
+2. A **port on the wrong plate.** Moving P2 onto a MIM Metal extension of the top plate extracts
+   cleanly and resolves onto level 1 — and shorts the capacitor out, because the shipped `KIT_MIMCAP`
+   already exits on the top plate (up to Metal2, back down to Metal1). P2 and P1 then share a node
+   and the bottom plate floats. The tell is in the data: the extracted series reactance is +78 to
+   +82 ohm across 2.3-2.7 GHz and **never crosses zero**, where a series L-C must. "The port is on
+   metal on exactly one level" was checked; what it was CONNECTED to was not.
+
+Also live and out of scope: a testbench sweeping 1-10 GHz against a 0.5-5 GHz `.s2p` with
+`ExtrapMode=NearestEdge` holds the top half of every curve flat at the 5 GHz value, and `check` on
+that netlist reports 0 errors, 0 warnings, 0 notes. EM-SEV named it; it is still silent.
