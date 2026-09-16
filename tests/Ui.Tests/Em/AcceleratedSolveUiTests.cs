@@ -171,6 +171,57 @@ public class AcceleratedSolveUiTests
         string dir = TempDir();
         var vm = Editor(dir);
         Assert.Null(vm.AcceleratedSolveDisabledReason);
+        Assert.Null(vm.AcceleratedSolveCeilingNote);
+    }
+
+    /// <summary>
+    /// <b>MIM-13 — a multi-level layout no longer DISABLES the control, and the reason it used to is
+    /// the thing that was stale.</b>
+    ///
+    /// <para>The old arm read "This layout needs the multi-level kernel … the accelerator models the
+    /// single-level horizontal basis family only", citing an engine refusal in
+    /// <c>PlanarSolve.SolveAt</c> as its authority. P12 retired that refusal and built
+    /// <c>PlanarBorderedAimOperator</c> for exactly this mesh, measuring it healthy to N = 15,192 —
+    /// so the panel was greying out a run that starts, completes and is faster, and explaining why
+    /// in a sentence that had stopped being true.</para>
+    ///
+    /// <para>What is unchanged is the CEILING, which is the half a user turning this on to escape a
+    /// refusal actually cares about. It is a NOTE beside a live control now rather than an implication
+    /// carried by a disabled one.</para>
+    /// </summary>
+    [Fact]
+    public void OnAMultiLevelLayout_ItIsAVAILABLE_AndTheNoteSaysTheCeilingDoesNotMove()
+    {
+        string dir = TempDir();
+        string path = Path.Combine(dir, "panel.cem");
+        var setup = new EmSetup { Name = "panel", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar };
+        EmSetupPersistence.SaveToFile(path, setup);
+
+        // Metal1 and the airbridge above it — two analysis levels, which is
+        // PlanarProblem.RequiresGeneralKernel's own condition.
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        view.Shapes.Add(new RectShape { Layer = new(1, 0), X1 = 0, Y1 = 0, X2 = 400_000, Y2 = 20_000 });
+        view.Shapes.Add(new RectShape { Layer = new(2, 0), X1 = 100_000, Y1 = 0, X2 = 300_000, Y2 = 20_000 });
+
+        var vm = new EmSetupEditorViewModel(path, setup)
+        {
+            ResolveLayout = _ => new EmLayoutSource(
+                Path.Combine(dir, "a.clay"), view, StarterTechnologies.MmicGaAs(), Dbu),
+        };
+        vm.Refresh();
+
+        Assert.True(vm.PlanarProblem?.RequiresGeneralKernel,
+            "the fixture must actually be multi-level or this gates nothing");
+
+        Assert.Null(vm.AcceleratedSolveDisabledReason);
+        Assert.NotNull(vm.AcceleratedSolveCeilingNote);
+        Assert.Contains($"{SurfaceMesher.UnknownCeiling:N0}", vm.AcceleratedSolveCeilingNote!,
+                        StringComparison.Ordinal);
+        Assert.Contains($"{SurfaceMesher.AcceleratedUnknownCeiling:N0}", vm.AcceleratedSolveCeilingNote!,
+                        StringComparison.Ordinal);
+        Assert.Contains("not headroom", vm.AcceleratedSolveCeilingNote!, StringComparison.Ordinal);
+
+        Directory.Delete(dir, true);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════

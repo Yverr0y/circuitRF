@@ -452,7 +452,8 @@ public sealed class PlanarKernel
                                     lengthFormat);
         }
 
-        var notes = new List<EmFinding>(EmFindings.AsNotes(report.Notes));
+        // MIM-13 item 3 — the mesher classes its own sentences; keep the class.
+        var notes = new List<EmFinding>(report.AllFindings);
         if (severedNote is not null) notes.Add(severedNote);
         if (acceleratorNote is not null) notes.Add(acceleratorNote);
         notes.AddRange(EmFindings.AsNotes(groundNotes));

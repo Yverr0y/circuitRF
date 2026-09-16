@@ -3671,13 +3671,20 @@ public static class PlanarFill
     /// of what the machine holds.</summary>
     private static void GuardCeiling(int n, int cellCount = 0)
     {
+        // MIM-13 — the fourth copy of PlanarSystem.GuardCeiling's own sentence, and it carried both
+        // of that sentence's defects: it named two remedies without asking whether either BINDS on
+        // this geometry (the 2026-08-14 owner report), and it closed on "matrix compression, which is
+        // not built", which has been false since M5. Neither is answerable from here — this guard has
+        // a basis count and nothing else — so it names both ceilings and points at the mesh report,
+        // which is where the remedies that act on THIS artwork are written.
         if (n > SurfaceMesher.UnknownCeiling)
             throw new InvalidOperationException(
                 $"This mesh has {n:N0} unknowns, which is past the {SurfaceMesher.UnknownCeiling:N0}-unknown " +
-                $"ceiling this kernel is built for ({PlanarSystem.ResidentPhrase(n, cellCount)}). " +
-                "Lower Cells per wavelength, turn the edge mesh off, or analyse a " +
-                "smaller region — full-wave analysis of a structure this size needs matrix " +
-                "compression, which is not built.");
+                $"ceiling this kernel is built for on the DENSE path " +
+                $"({PlanarSystem.ResidentPhrase(n, cellCount)}). The ACCELERATED solve has its own, " +
+                $"higher ceiling — {SurfaceMesher.AcceleratedUnknownCeiling:N0} unknowns, on a " +
+                "single-level mesh. Mesh the setup for the budget and for the remedies that bind on " +
+                "this particular geometry.");
     }
 
     /// <summary>Packed upper-triangle index for <c>i ≤ j</c> in an <c>n×n</c> symmetric array.</summary>

@@ -222,6 +222,21 @@ public static class SurfaceMesher
     public const double WarnFraction = 0.6;
 
     /// <summary>
+    /// <b>MIM-13 — at or above this rim fraction, turning the edge mesh off stops being an
+    /// approximation and becomes the answer</b>, so the edge-mesh-off sentence is a WARNING rather
+    /// than one note among thirty (<c>PlanarMeshReport.RimFraction</c> is the quantity).
+    ///
+    /// <para>0.5 is the literal reading of "mostly rim" — at or above it, more of the metal is
+    /// within one cell of an edge than is not — and it is not a tuned number: the two populations
+    /// are nowhere near it from either side. The shipped three-turn spiral reads <b>1.00</b> (10 µm
+    /// of metal at a 5 µm pitch: both cells across it are rim cells and there is no interior at
+    /// all), and a patch or a plate reads a few percent. A threshold anywhere in 0.15–0.85 would
+    /// classify both the same way, which is what makes the discriminator worth having rather than
+    /// the constant worth arguing about.</para>
+    /// </summary>
+    public const double MostlyRimFraction = 0.5;
+
+    /// <summary>
     /// A guard on the GRID, not on N: past this many candidate grid cells the mesh cannot be built
     /// at all, so the report is a refusal carrying the estimate rather than an out-of-memory. It sits
     /// far above anything R17 would let through, so in practice R17 refuses first and this never
@@ -248,7 +263,13 @@ public static class SurfaceMesher
             (accelerated
                 ? " (brief-em-aim-ceiling.md; the accelerator's own working set stays under 200 MB " +
                   "even at this ceiling — it is not a memory limit either)."
-                : $" ({PlanarSystem.ResidentPhrase(n, cellCount)})."));
+                : $" ({PlanarSystem.ResidentPhrase(n, cellCount)}).") +
+            // MIM-13 item 1 — BOTH numbers, always, and which path each governs. This guard is the
+            // one a caller that skipped the report reaches, so it is often the only sentence anyone
+            // sees; naming only the ceiling that happened to refuse leaves them with no scale.
+            $" The dense path's ceiling is {UnknownCeiling:N0} unknowns and the accelerated solve's " +
+            $"is {AcceleratedUnknownCeiling:N0} (single-level meshes only); mesh this problem through " +
+            "SurfaceMesher.Mesh for the budget, the remedies and which of the two governs it.");
     }
 
     /// <summary>
@@ -330,7 +351,10 @@ public static class SurfaceMesher
         int  ceiling = accel ? AcceleratedUnknownCeiling : UnknownCeiling;
         var  fmt = lengthFormat ?? DefaultLengthFormat;
 
-        var notes = new List<string>();
+        // EM-SEV — the mesher's sentences carry their CLASS from here on. A plain string still
+        // converts implicitly to a Note, so every existing `notes.Add("…")` is unchanged and only the
+        // one sentence that is genuinely a warning has to say so (MIM-13 item 3).
+        var notes = new List<EmFinding>();
 
         // ── M0: the mesh is sized at MeshFrequencyHz, which defaults to the sweep's own top ───────
         //
@@ -681,6 +705,40 @@ public static class SurfaceMesher
 
         double[] gx = BuildGridLines(x0, x1, hardX, gradedX, hMaxX, anyGrowthX, pitch?.AtX);
         double[] gy = BuildGridLines(y0, y1, hardY, gradedY, hMaxY, anyGrowthY, pitch?.AtY);
+
+        // ── MIM-13 — WHERE THE GRIDLINES WENT: BULK AGAINST FAN, MEASURED RATHER THAN ESTIMATED ──
+        //
+        // The grid is a tensor product, so a graded cell at one rim is a gridline across the WHOLE
+        // part and the fan's cost is a line count, not a cell size. The honest way to split that is
+        // to ask this same function for the grid it would have built with no grading at all — which
+        // is exactly the grid the edge mesh being off produces, since `hardX`/`hardY` (the conductor
+        // edges themselves) do not depend on the edge mesh and `gradedX`/`gradedY` feed nothing else.
+        // Estimating it instead (log_r of the pitch ratio, times the attractor count) was the first
+        // thing written and is wrong wherever the marcher's rescale or the cap enforcement moved a
+        // line, which on real artwork is most of them.
+        //
+        // It costs one ungraded partition per axis — O(lines), no polygon scan, no cell assembly —
+        // and only when grading is on at all. The scan below is where meshing's time actually goes.
+        int bulkLinesX = anyGrowthX
+            ? BuildGridLines(x0, x1, hardX, gradedX, hMaxX, false, pitch?.AtX).Length : gx.Length;
+        int bulkLinesY = anyGrowthY
+            ? BuildGridLines(y0, y1, hardY, gradedY, hMaxY, false, pitch?.AtY).Length : gy.Length;
+
+        // ── MIM-13 — HOW MUCH OF THIS ARTWORK IS RIM ─────────────────────────────────────────────
+        //
+        // Perimeter x bulk pitch, over area: the fraction of the metal that lies within one cell of
+        // an edge. On a strip of width w at pitch p it is 2p/w, so the shipped 10 um spiral at a 5 um
+        // pitch reads 1.0 — every cell across it touches an edge and there is no interior at all —
+        // while a patch reads a few percent. That is the discriminator item 3 needs and the ONE
+        // number that separates "the edge mesh is a local correction here" from "the edge mesh is the
+        // current distribution here".
+        //
+        // MEASURED FROM THE POLYGONS, NOT FROM THE MESH, on purpose: it has to mean the same thing
+        // with the edge mesh on (where the rim cells are finer than the bulk pitch) and off, or the
+        // note that fires only in the OFF case would be discriminating on a quantity it changed.
+        // The pitch is the finest bulk value, which under-states the fraction — a warning raised on
+        // it is never raised on artwork that is not really rim.
+        double rimFraction = RimFraction(problem, Math.Min(hx, hy));
 
         // ── Cells ─────────────────────────────────────────────────────────────────────────────
         var cells  = new List<PlanarCell>();
@@ -1147,7 +1205,33 @@ public static class SurfaceMesher
         }
         else
         {
-            notes.Add("Edge mesh off — the 1/√d edge current is not resolved, so loss and Z₀ will read low.");
+            // ── MIM-13 item 3 — THE SAME SENTENCE, PROMOTED WHERE IT IS THE WHOLE ANSWER ─────────
+            //
+            // "loss and Z₀ will read low" is correct at every rim fraction and reads as one caveat
+            // among thirty, which is what it is on a patch: a few percent of the metal is within a
+            // cell of an edge and the 1/√d crowding is a local correction to a current the bulk
+            // already describes. On a spiral inductor there IS no bulk — every cell across 10 µm of
+            // metal touches an edge — and the quantity that reads low is the Q, which is the reason
+            // the user is running a spiral through a full-wave kernel at all. A user who turns the
+            // edge mesh off to fit under the ceiling is then trading exactly what they came for,
+            // silently.
+            //
+            // So the sentence is a WARNING past the measured fraction and a note below it, with the
+            // fraction itself quoted either way — the number is what lets a reader judge their own
+            // artwork rather than take the class on trust. 0.5 is "mostly", literally: at or above
+            // it more of the metal is rim than is not.
+            string cost = "Edge mesh off — the 1/√d edge current is not resolved, so loss and Z₀ " +
+                          "will read low.";
+            notes.Add(rimFraction >= MostlyRimFraction
+                ? EmFinding.Warn(
+                    cost + $" {rimFraction:P0} of this artwork is within one cell of a conductor " +
+                    "edge, so that is not a correction to the current here — it is most of the " +
+                    "current. On a spiral or any other mostly-rim part the quantity it reads low is " +
+                    "the Q. Turning the edge mesh on is what resolves it; if it was turned off to " +
+                    "fit under the unknown ceiling, coarsening Cells across a conductor costs less " +
+                    "accuracy than this does.")
+                : cost + $" {rimFraction:P0} of this artwork is within one cell of a conductor " +
+                         "edge, so on this part it is a correction rather than the answer.");
         }
 
         // ── The boundary model, said in the notes because this phase's whole visible effect is here
@@ -1225,6 +1309,18 @@ public static class SurfaceMesher
                     : n >= (int)(ceiling * WarnFraction) ? PlanarBudgetVerdict.Warn
                     : PlanarBudgetVerdict.Ok;
 
+        // ── MIM-13 item 2 — THE BUDGET GOES FIRST, AND IT GOES OUT WHATEVER THE VERDICT ──────────
+        //
+        // Inserted at index 0 rather than appended: it is the summary of everything below it, and a
+        // summary at the bottom of thirty sentences is not a summary. It is written on an Ok mesh
+        // too — seeing the headroom before it runs out is most of the point.
+        string budget = BuildBudget(n, cells.Count, viaUnknowns, mesh.LayerNames, perLayerUnknowns,
+                                    gx.Length, gy.Length, bulkLinesX, bulkLinesY,
+                                    accelerated: accel, multiLevel: problem.RequiresGeneralKernel,
+                                    rimFraction: rimFraction,
+                                    edgeMesh: s.EdgeMesh && s.EdgeCells > 0);
+        notes.Insert(0, budget);
+
         string? refusal = null;
         if (verdict == PlanarBudgetVerdict.Refused)
             refusal = BuildRefusal(n, cells.Count, s, narrowX, narrowY, hx, hy, hWave, x1 - x0, y1 - y0,
@@ -1232,6 +1328,7 @@ public static class SurfaceMesher
                                    accelerated: accel,
                                    acceleratedWouldFit: !accel && n <= AcceleratedUnknownCeiling
                                                       && !problem.RequiresGeneralKernel,
+                                   multiLevel: problem.RequiresGeneralKernel,
                                    fmt: fmt,
                                    coarsestPitch: pitch is null
                                        ? 0 : Math.Max(pitch.MaxPitchX, pitch.MaxPitchY))
@@ -1265,7 +1362,7 @@ public static class SurfaceMesher
             ViaUnknownCount:               viaUnknowns,
             Verdict:                       verdict,
             Refusal:                       refusal,
-            Notes:                         notes,
+            Notes:                         EmFindings.Texts(notes),
             BoundaryCells:                 s.BoundaryCells,
             CutCellCount:                  conformal.Cut,
             MergedSliverCount:             conformal.Merged,
@@ -1274,7 +1371,123 @@ public static class SurfaceMesher
             OneDirectionCells:             conformal.OneDirectionOnly,
             DetailFloorM:                  detailFloor,
             ShapesBelowDetailFloor:        narrowness.ShapesBelowFloor,
-            LongestEdgeFanCells:           fanCells);
+            LongestEdgeFanCells:           fanCells,
+            Budget:                        budget,
+            Findings:                      notes,
+            CeilingUnknowns:               ceiling,
+            AcceleratedCeiling:            accel,
+            GridLinesX:                    gx.Length,
+            GridLinesY:                    gy.Length,
+            BulkGridLinesX:                bulkLinesX,
+            BulkGridLinesY:                bulkLinesY,
+            RimFraction:                   rimFraction);
+    }
+
+
+    /// <summary>
+    /// <b>MIM-13 — the fraction of the drawn metal that lies within one bulk cell of a conductor
+    /// edge</b>, clamped to 1. Perimeter × pitch ÷ area, over every conductor layer's outer rings
+    /// AND hole rings (a hole's rim is a conductor edge and carries the same 1/√d current).
+    ///
+    /// <para><b>From the POLYGONS, never from the mesh</b>, so it means the same thing with the edge
+    /// mesh on and off — a rim-fraction computed from realised cell sizes would fall the moment the
+    /// fan refined the rim, which is the one change it has to be independent of. On a strip of width
+    /// <c>w</c> at pitch <c>p</c> it is exactly <c>2p/w</c>, which is the arithmetic that makes 1.0
+    /// the right answer for metal meshed two cells across.</para>
+    /// </summary>
+    /// <param name="bulkPitchM">The bulk cell size — the finest of the two axes, which UNDER-states
+    /// the fraction, so a warning raised on it is never raised on artwork that is not really rim.</param>
+    internal static double RimFraction(PlanarProblem problem, double bulkPitchM)
+    {
+        if (!(bulkPitchM > 0) || double.IsInfinity(bulkPitchM)) return 0;
+
+        double perimeter = 0, area = 0;
+        foreach (var layer in problem.Layers)
+            foreach (var poly in layer.Polygons)
+            {
+                perimeter += RingLength(poly.Outer);
+                foreach (var h in poly.HoleRings) perimeter += RingLength(h);
+                area += poly.Area();
+            }
+
+        if (!(area > 0)) return 0;
+        return Math.Min(1.0, perimeter * bulkPitchM / area);
+
+        static double RingLength(IReadOnlyList<EmPoint> ring)
+        {
+            double L = 0;
+            for (int i = 0; i < ring.Count; i++)
+            {
+                var a = ring[i];
+                var b = ring[(i + 1) % ring.Count];
+                L += Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+            }
+            return L;
+        }
+    }
+
+    /// <summary>
+    /// <b>MIM-13 item 2 — the budget, before the solve.</b> What the mesh costs, where it went, and
+    /// which ceiling it is judged against — the three things a user conflates into "the mesh is bad".
+    ///
+    /// <para>It is written whatever the verdict, including <see cref="PlanarBudgetVerdict.Ok"/>,
+    /// because the value of the number is largely in seeing it BEFORE it is a problem. It states
+    /// both ceilings every time and names which governs and why, so nobody has to infer from a
+    /// refusal quoting 5,000 that a mesh of 9,316 is hopeless when the other ceiling is 12,000.</para>
+    /// </summary>
+    private static string BuildBudget(
+        int n, int cellCount, int viaUnknowns,
+        IReadOnlyList<string> layerNames, IReadOnlyList<int> unknownsPerLayer,
+        int gxLines, int gyLines, int bulkXLines, int bulkYLines,
+        bool accelerated, bool multiLevel, double rimFraction, bool edgeMesh)
+    {
+        int ceiling = accelerated ? AcceleratedUnknownCeiling : UnknownCeiling;
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"Mesh budget: {cellCount:N0} cells, {n:N0} unknowns");
+
+        // PER LEVEL, because on a multi-level part "where did the unknowns go" is usually answered
+        // by one level carrying nearly all of them, and that is invisible in the total.
+        if (layerNames.Count > 1)
+        {
+            var parts = new List<string>(layerNames.Count);
+            for (int i = 0; i < layerNames.Count && i < unknownsPerLayer.Count; i++)
+                parts.Add($"{unknownsPerLayer[i]:N0} on {layerNames[i]}");
+            sb.Append(" (").Append(string.Join(", ", parts));
+            if (viaUnknowns > 0) sb.Append($", {viaUnknowns:N0} vertical");
+            sb.Append(')');
+        }
+        else if (viaUnknowns > 0)
+        {
+            sb.Append($" ({viaUnknowns:N0} of them vertical)");
+        }
+
+        sb.Append(". ");
+
+        // THE CEILING, BOTH NUMBERS, AND WHICH ONE GOVERNS — every time, not only on a refusal.
+        sb.Append(accelerated
+            ? $"Judged against the ACCELERATED ceiling, {AcceleratedUnknownCeiling:N0} unknowns " +
+              $"(the dense path's is {UnknownCeiling:N0})"
+            : $"Judged against the DENSE ceiling, {UnknownCeiling:N0} unknowns (the accelerated " +
+              $"solve's is {AcceleratedUnknownCeiling:N0}" +
+              (multiLevel
+                  ? ", and it does not apply to this mesh — more than one metal level, or a via"
+                  : ", reached by turning the accelerated solve on") + ")");
+        sb.Append(n > ceiling ? $" — {(double)n / ceiling:G3}× OVER. "
+                : $" — {(double)n / ceiling:P0} of it. ");
+
+        // BULK AGAINST FAN, in gridlines, which is the unit a tensor product's cost has.
+        sb.Append($"Grid {gxLines:N0} × {gyLines:N0} lines");
+        if (edgeMesh && (gxLines > bulkXLines || gyLines > bulkYLines))
+            sb.Append($", of which {gxLines - bulkXLines:N0} × {gyLines - bulkYLines:N0} are edge-fan " +
+                      $"lines — with the edge mesh off the grid is {bulkXLines:N0} × {bulkYLines:N0}, " +
+                      $"about {(double)bulkXLines * bulkYLines / ((double)gxLines * gyLines):P0} of " +
+                      "the cells");
+        else
+            sb.Append(edgeMesh ? ", none of them from the edge fan" : " (no edge fan — edge mesh off)");
+
+        sb.Append($". {rimFraction:P0} of the artwork is within one cell of a conductor edge.");
+        return sb.ToString();
     }
 
     /// <summary>
@@ -1323,7 +1536,7 @@ public static class SurfaceMesher
         int n, int cellCount, PlanarMeshSettings s,
         double narrowX, double narrowY, double hx, double hy, double hWave,
         double extentX, double extentY, int cellsAcrossRealised,
-        bool accelerated, bool acceleratedWouldFit,
+        bool accelerated, bool acceleratedWouldFit, bool multiLevel,
         PlanarLengthFormat fmt, double coarsestPitch = 0)
     {
         double pitch     = Math.Min(hx, hy);
@@ -1423,33 +1636,74 @@ public static class SurfaceMesher
               "cascading them is the usual way through a part whose widest metal is many times its " +
               "narrowest.";
 
+        // ── THE TWO CEILINGS, BOTH NAMED, AND THE PATH EACH GOVERNS (MIM-13 item 1) ─────────────
+        //
+        // Every branch below states 5,000 AND 12,000 and says which path each belongs to. It used to
+        // state only the one that refused, which leaves a reader with 30,000 and one number to judge
+        // it by and no way to tell 2.5× over from 6× over.
+        //
+        // TWO CLAUSES WERE FALSE AND ARE GONE.
+        //
+        // (a) "…needs matrix compression, which is not built." That was true when it was written and
+        //     has not been since M5. AIM is matrix compression, it is built, it is a checkbox, and on
+        //     the ACCELERATED branch it was being said about a run that had it turned ON. A user who
+        //     reads it concludes the tool cannot do this at all.
+        //
+        // (b) "…the accelerated solve would not help either — this mesh is past its 12,000-unknown
+        //     ceiling too." Reached in TWO cases and true in only one of them. `acceleratedWouldFit`
+        //     is false both when N really is past 12,000 and when the mesh is MULTI-LEVEL — where
+        //     `UsesAcceleratedCeiling` withholds the wider ceiling by an open owner decision rather
+        //     than because the accelerator cannot run it (P12 built `PlanarBorderedAimOperator` for
+        //     exactly that mesh). Measured on the shipped three-turn spiral with the edge mesh on:
+        //     N = 9,316, two levels, one via — the refusal told the user their mesh was past a
+        //     ceiling that is 12,000, about a mesh of 9,316. `multiLevel` splits the two apart and
+        //     each gets the sentence that is true of it.
+        string ceilingPair =
+            $"There are two ceilings: the DENSE path's, {UnknownCeiling:N0} unknowns, and the " +
+            $"ACCELERATED solve's, {AcceleratedUnknownCeiling:N0}.";
+
         string costNote = accelerated
             ? // The dense byte count is meaningless here — this mesh will never see a dense matrix —
               // and the accelerator's own working set has no closed form (it depends on geometry), so
               // this states the measured ballpark rather than a number nothing computed for this run.
-              $"(This is already the ACCELERATED ceiling — {AcceleratedUnknownCeiling:N0} unknowns, " +
-              "measured healthy on a wide-to-narrow taper's own growth pattern and, separately, on a " +
-              "conformally cut mesh; the accelerator's own working set stays under 200 MB even at that " +
-              "ceiling. A mesh refined mainly by RESOLUTION rather than by extent can fail to converge " +
-              "before reaching it — GMRES throws rather than returning a wrong answer when that " +
-              "happens, so it is reported at solve time, not here. Solving a mesh this size at all " +
-              "needs matrix compression, which is not built.)"
+              $"({ceilingPair} This run is already on the accelerated one — {AcceleratedUnknownCeiling:N0} " +
+              "unknowns, measured healthy on a wide-to-narrow taper's own growth pattern and, " +
+              "separately, on a conformally cut mesh; the accelerator's own working set stays under " +
+              "200 MB even at that ceiling. Matrix compression IS what is running here, and this mesh " +
+              "is past what it has been measured to carry, so the remedy is a smaller count rather " +
+              "than a different solver. A mesh refined mainly by RESOLUTION rather than by extent can " +
+              "also fail to converge before reaching this ceiling — GMRES throws rather than returning " +
+              "a wrong answer when that happens, so it is reported at solve time, not here.)"
             : acceleratedWouldFit
               ? // The remedy above already says what to do; this says WHY it works, in the same terms
                 // the dense-only sentence used, so a user comparing the two ceilings sees real numbers.
-                $"(The dense path's {UnknownCeiling:N0}-unknown ceiling is a fixed property of this " +
-                $"kernel, not of your machine — {n:N0} unknowns is " +
+                $"({ceilingPair} Both are fixed properties of this kernel, not of your machine — " +
+                $"{n:N0} unknowns is " +
                 $"{PlanarSystem.ResidentPhrase(n, cellCount)}, and " +
-                "the same geometry refuses identically everywhere. The accelerated solve's own ceiling " +
-                $"is higher — {AcceleratedUnknownCeiling:N0} unknowns, measured — because its working " +
-                "set is a near-field sparse correction plus a uniform auxiliary grid rather than the " +
-                "full N×N matrix, which is why turning it on is the first remedy above rather than a " +
-                "change to this mesh.)"
-              : $"(The ceiling is a fixed property of this kernel, not of your machine — {n:N0} " +
-                $"unknowns is {PlanarSystem.ResidentPhrase(n, cellCount)}, and the same geometry " +
-                "refuses identically everywhere. Solving a mesh this size directly needs matrix " +
-                "compression, which is not built; the accelerated solve would not help either — this " +
-                $"mesh is past its {AcceleratedUnknownCeiling:N0}-unknown ceiling too.)";
+                "the same geometry refuses identically everywhere. The accelerated solve's is higher " +
+                "because its working set is a near-field sparse correction plus a uniform auxiliary " +
+                "grid rather than the full N×N matrix, and this mesh fits under it — which is why " +
+                "turning it on is the first remedy above rather than a change to this mesh.)"
+              : multiLevel && n <= AcceleratedUnknownCeiling
+                ? // The mesh WOULD fit under 12,000 and the accelerator WOULD run it (P12's bordered
+                  // operator). What it does not get is the wider ceiling. Saying so is the difference
+                  // between a user who coarsens by 1.9× and one who concludes the tool cannot do this.
+                  $"({ceilingPair} This mesh is under the accelerated one, but it does not get it: it " +
+                  "carries more than one metal level or a via, and the accelerated ceiling has only " +
+                  "been measured on a single-level mesh. The accelerated solve itself DOES run a mesh " +
+                  "like this one — its cost there is set by how many VERTICAL unknowns it carries " +
+                  $"rather than by N, which is why a ceiling stated in N alone is not offered for it — " +
+                  $"so turning it on is worth doing for speed and memory, but it will not lift this " +
+                  $"refusal. What does is a count at or under {UnknownCeiling:N0}, which is " +
+                  $"{(double)n / UnknownCeiling:G3}× down from here. Both ceilings are fixed " +
+                  $"properties of this kernel, not of your machine — {n:N0} unknowns is " +
+                  $"{PlanarSystem.ResidentPhrase(n, cellCount)}, and " +
+                  "the same geometry refuses identically everywhere.)"
+                : $"({ceilingPair} This mesh is past BOTH, so the accelerated solve would not lift " +
+                  $"this refusal either — it is {(double)n / AcceleratedUnknownCeiling:G3}× over the " +
+                  "accelerated ceiling as well. Both are fixed properties of this kernel, not of " +
+                  $"your machine — {n:N0} unknowns is {PlanarSystem.ResidentPhrase(n, cellCount)}, and the same " +
+                  "geometry refuses identically everywhere.)";
 
         return $"This geometry needs {n:N0} unknowns, past the {ceiling:N0}-unknown ceiling " +
                "this kernel is built for." + why +
@@ -2798,19 +3052,19 @@ public static class SurfaceMesher
     // ── Degenerate reports ────────────────────────────────────────────────────────────────────
 
     private static PlanarMeshReport Empty(
-        List<string> layerNames, double meshFreqHz, double lambdaG, double hWave, List<string> notes)
+        List<string> layerNames, double meshFreqHz, double lambdaG, double hWave, List<EmFinding> notes)
         => new(new PlanarMesh([], [], layerNames, [], []),
                0, 0, new int[layerNames.Count], new int[layerNames.Count],
                0, 0, 0, 0, meshFreqHz, lambdaG, hWave, 0, 0, 0,
-               PlanarBudgetVerdict.Ok, null, notes);
+               PlanarBudgetVerdict.Ok, null, EmFindings.Texts(notes), Findings: notes);
 
     private static PlanarMeshReport Refused(
         List<string> layerNames, double meshFreqHz, double lambdaG, double hWave,
-        double narrowest, double edgeRef, int staircased, List<string> notes, string refusal)
+        double narrowest, double edgeRef, int staircased, List<EmFinding> notes, string refusal)
         => new(new PlanarMesh([], [], layerNames, [], []),
                0, 0, new int[layerNames.Count], new int[layerNames.Count],
                0, 0, 0, narrowest, meshFreqHz, lambdaG, hWave, edgeRef, staircased, 0,
-               PlanarBudgetVerdict.Refused, refusal, notes);
+               PlanarBudgetVerdict.Refused, refusal, EmFindings.Texts(notes), Findings: notes);
 
     // ── Formatting ────────────────────────────────────────────────────────────────────────────
 

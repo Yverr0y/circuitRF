@@ -248,12 +248,35 @@ public sealed class PlanarSystem : IPlanarOperator
     public static void GuardCeiling(int n, int cellCount = 0)
     {
         if (n <= SurfaceMesher.UnknownCeiling) return;
+        // ── MIM-13 item 1 — WHAT THIS SENTENCE USED TO END ON, AND WHY IT HAD TO CHANGE ─────────
+        //
+        // It ended "full-wave analysis of a structure this size needs matrix compression, which is
+        // not built." That was true when it was written and has not been since M5: AIM is matrix
+        // compression, it is built, it is a checkbox in Solver options, and it carries its own,
+        // higher, separately measured ceiling. A user reading the old clause concludes the tool
+        // cannot do this at all and stops — which is exactly what the 2026-09 spiral report looked
+        // like. So the two ceilings are both named, with the path each governs, and the accelerated
+        // one is offered rather than denied.
+        //
+        // The REMEDY LIST is still not this guard's to write. SurfaceMesher.BuildRefusal asks which
+        // quantity actually binds before naming a knob, and this call site has no mesh geometry left
+        // to ask it of — naming "lower Cells per wavelength" unconditionally from here is the defect
+        // the 2026-08-14 owner report was about, in a second place. It points at the mesh report,
+        // which is where the remedies that BIND are written.
         throw new InvalidOperationException(
             $"This geometry needs {n:N0} unknowns, which is past the " +
-            $"{SurfaceMesher.UnknownCeiling:N0}-unknown ceiling this kernel is built for " +
+            $"{SurfaceMesher.UnknownCeiling:N0}-unknown ceiling this kernel is built for on the " +
+            "DENSE path " +
             $"({ResidentPhrase(n, cellCount)}). " +
-            "Lower Cells per wavelength, turn the edge mesh off, or analyse a smaller region — " +
-            "full-wave analysis of a structure this size needs matrix compression, which is not built.");
+            $"The ACCELERATED solve (Solver options) has its own, higher ceiling — " +
+            $"{SurfaceMesher.AcceleratedUnknownCeiling:N0} unknowns, on a single-level mesh — and " +
+            (n <= SurfaceMesher.AcceleratedUnknownCeiling
+                ? "this mesh fits under it, so turning it on is the first thing to try. "
+                : $"this mesh is past that too ({(double)n / SurfaceMesher.AcceleratedUnknownCeiling:G3}× over), " +
+                  "so the count itself has to come down. ") +
+            "Mesh the setup for the budget and for the remedies that act on this particular " +
+            "geometry — which knob binds depends on the artwork, and this guard has no mesh left to " +
+            "ask it of.");
     }
 
     /// <summary>Fills the Galerkin matrix at one angular frequency and wraps it. The cores' own

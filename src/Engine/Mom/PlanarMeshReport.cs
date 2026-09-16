@@ -100,6 +100,47 @@ public enum PlanarBudgetVerdict
 /// <param name="MeshedAreaM2">Σ of the cells' areas — <b>the tiling gate's own quantity</b> (R-cut-1).
 /// Against the drawn artwork's area it is the mesh's area error, which L8b measured at 0.47–0.59% on
 /// the shipping tapers and which conformal cells are meant to take to round-off.</param>
+/// <param name="Budget">
+/// <b>MIM-13 — the whole budget in one paragraph, written BEFORE anything is solved.</b> Cells and
+/// unknowns, split per level and bulk-against-fan, against BOTH ceilings with the one that governs
+/// named.
+///
+/// <para>It exists because the three things a user conflates into "the mesh is bad" are separate and
+/// only one of them is visible today: the count, where the count came from, and which ceiling the
+/// count is judged against. A refusal after a minute of waiting says the first; this says all three
+/// in the second it takes to mesh, so "I can see this is 1.9× over, let me coarsen" replaces "I
+/// waited and then it refused". Emitted from the MESH — the fill has not run and must not have to.</para>
+/// </param>
+/// <param name="Findings">
+/// <b>EM-SEV, for the mesher's own sentences.</b> <paramref name="Notes"/> is every finding's text
+/// in order and stays the spelling most call sites read; this is the same list WITH each sentence's
+/// class, so a mesher warning survives the trip to the Messages panel instead of arriving at the
+/// weight of the core count. Null on a report built before this existed — <see cref="AllFindings"/>
+/// is what to read, and it falls back to "every note is a Note".
+/// </param>
+/// <param name="CeilingUnknowns">The ceiling this verdict was judged against — <c>UnknownCeiling</c>
+/// or <c>AcceleratedUnknownCeiling</c>. Reported rather than re-derived: which one applies is
+/// <c>SurfaceMesher.UsesAcceleratedCeiling</c>'s answer and a second copy of it would drift.</param>
+/// <param name="AcceleratedCeiling">Whether <paramref name="CeilingUnknowns"/> is the accelerated
+/// one.</param>
+/// <param name="GridLinesX">Gridlines in x, the grid that was actually built.</param>
+/// <param name="GridLinesY">Gridlines in y.</param>
+/// <param name="BulkGridLinesX">
+/// <b>What x would have been with no edge fan</b>, from the same <c>BuildGridLines</c> call with
+/// grading off — measured, not estimated, and equal to <paramref name="GridLinesX"/> when the edge
+/// mesh is off. A tensor product turns one graded cell into a gridline across the whole part, so the
+/// difference between these two numbers IS what the edge mesh costs, in the only unit a tensor grid
+/// has one in.
+/// </param>
+/// <param name="BulkGridLinesY">The same in y.</param>
+/// <param name="RimFraction">
+/// <b>How much of this artwork is rim</b> — the metal's own perimeter times the bulk pitch, over the
+/// metal's area, clamped to 1. A three-turn spiral of 10 µm metal meshed at a 5 µm pitch is 1.0:
+/// every cell across it touches an edge and there is no interior at all. A patch is a few percent.
+/// It is the discriminator for whether turning the edge mesh off is a small approximation or the
+/// whole current distribution, and it is measured from the polygons rather than from the mesh so it
+/// means the same thing with the edge mesh on or off.
+/// </param>
 public sealed record PlanarMeshReport(
     PlanarMesh            Mesh,
     int                   CellCount,
@@ -127,10 +168,27 @@ public sealed record PlanarMeshReport(
     int                   OneDirectionCells      = 0,
     double                DetailFloorM           = 0,
     int                   ShapesBelowDetailFloor = 0,
-    int                   LongestEdgeFanCells    = 0)
+    int                   LongestEdgeFanCells    = 0,
+    string                Budget                 = "",
+    IReadOnlyList<EmFinding>? Findings           = null,
+    int                   CeilingUnknowns        = 0,
+    bool                  AcceleratedCeiling     = false,
+    int                   GridLinesX             = 0,
+    int                   GridLinesY             = 0,
+    int                   BulkGridLinesX         = 0,
+    int                   BulkGridLinesY         = 0,
+    double                RimFraction            = 0)
 {
     /// <summary>True when the problem may be handed to a solver — R17's gate, asked once.</summary>
     public bool CanSolve => Verdict != PlanarBudgetVerdict.Refused;
+
+    /// <summary>
+    /// <see cref="Findings"/>, or every note at <see cref="EmSeverity.Note"/> when a producer
+    /// predates the class. <b>Read this, never <see cref="Notes"/>, when the class matters</b> — the
+    /// fallback is what keeps a report built by an older call site from losing its sentences.
+    /// </summary>
+    public IReadOnlyList<EmFinding> AllFindings
+        => Findings ?? [.. EmFindings.AsNotes(Notes)];
 }
 
 /// <summary>

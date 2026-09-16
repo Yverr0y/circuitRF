@@ -320,7 +320,9 @@ public static class EmRunService
                                          EmDiagnostics.SolveFailed(ex.Message).Render());
         }
 
-        findings.AddRange(EmFindings.AsNotes(report.Notes));
+        // MIM-13 item 3 — AllFindings, not AsNotes(Notes): the mesher classes its own sentences
+        // now, and flattening them here is what put a warning at the weight of the core count.
+        findings.AddRange(report.AllFindings);
 
         // MIM-3/MIM-8's question, which is a property of the MESH against the STACKUP and needs no
         // solve to answer — and which, past the measured bound, is EM-SEV R-emsev-4's warning.

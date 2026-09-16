@@ -1024,10 +1024,17 @@
                           Content="Use the AIM accelerator (much less memory; faster only on large meshes)"
                           IsChecked="{Binding ViewModel.AcceleratedSolve}"
                           IsEnabled="{Binding ViewModel.AcceleratedSolveDisabledReason, Converter={x:Static ObjectConverters.IsNull}}"
-                          ToolTip.Tip="Solves the same system iteratively against a grid-accelerated matrix-vector product instead of forming and factoring the full dense matrix. It computes the same answer a different way, to its own accuracy gates. The win is working-set memory - roughly 4x less past about 900 unknowns - and it is also faster per frequency point past about 1,100; below that the dense path is faster. It DOES raise the unknown ceiling, from 5,000 to 12,000. Single metal level only, no vias: a multi-level or via-bearing mesh is judged against the 5,000 dense ceiling whatever this says."/>
+                          ToolTip.Tip="Solves the same system iteratively against a grid-accelerated matrix-vector product instead of forming and factoring the full dense matrix. It computes the same answer a different way, to its own accuracy gates. The win is working-set memory - roughly 4x less past about 900 unknowns - and it is also faster per frequency point past about 1,100; below that the dense path is faster. It DOES raise the unknown ceiling, from 5,000 to 12,000 - on a single-level mesh. A multi-level or via-bearing mesh RUNS accelerated (as a bordered system) but is still judged against the 5,000 dense ceiling, because its cost there is set by the vertical unknown count rather than by N."/>
                 <TextBlock Classes="colhdr" TextWrapping="Wrap"
                            Text="{Binding ViewModel.AcceleratedSolveDisabledReason}"
                            IsVisible="{Binding ViewModel.AcceleratedSolveDisabledReason, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                <!-- MIM-13 - the multi-level arm of the DISABLED reason was stale (P12 built the
+                     bordered accelerator for exactly that mesh) and it greyed the control out on a
+                     run that starts and is faster. The control is live now; what a multi-level mesh
+                     still does not get is the WIDER CEILING, and that is what this says. -->
+                <TextBlock Classes="colhdr" TextWrapping="Wrap"
+                           Text="{Binding ViewModel.AcceleratedSolveCeilingNote}"
+                           IsVisible="{Binding ViewModel.AcceleratedSolveCeilingNote, Converter={x:Static ObjectConverters.IsNotNull}}"/>
 
                 <!-- ── PCAL2 — the calibration override. The de-embedding checkbox that stood
                      here is GONE: R-pcal2-3 added it only so the mesh-ceiling refusal's recommended

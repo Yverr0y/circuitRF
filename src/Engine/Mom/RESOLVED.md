@@ -3,6 +3,106 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## MIM-13 — where the unknowns go on a spiral, and the two ceilings (2026-09-16)
+
+`brief-em-mim-13-headroom-edge-mesh-and-ceilings.md`. All three items built. **Item 1 turned out to
+be code, not wording, and one of the sentences it replaced was arithmetically false.**
+
+### The verdict, in one paragraph
+
+The brief's first action — capture the exact refusal from an edge-mesh-on spiral run before deciding
+whether item 1 is code — was run headlessly on the shipped three-turn 10/8 µm spiral
+(`examples/PDK PCells`). It meshes at **N = 9,316** over two metal levels and one via, is **REFUSED
+against the DENSE 5,000**, and the refusal's closing clause read *"the accelerated solve would not
+help either — this mesh is past its 12,000-unknown ceiling too"* **about a mesh of 9,316**. The
+report of AIM "needing a multi-level kernel" is a SECOND, separate thing and it is a stale panel
+message: `EmSetupEditorViewModel.AcceleratedSolveDisabledReason` disabled the checkbox outright,
+citing an engine refusal in `PlanarSolve.SolveAt` that **P12 retired** when it built
+`PlanarBorderedAimOperator` for exactly that class of mesh. So a user on a multi-level part could not
+arm the accelerator at all, and was told why in a sentence that had stopped being true.
+
+### Findings
+
+**1. `acceleratedWouldFit` is false for TWO different reasons and the refusal said one sentence about
+both.** `!accel && n <= AcceleratedUnknownCeiling && !problem.RequiresGeneralKernel` — so the
+else-branch is reached both when N really is past 12,000 and when the mesh is MULTI-LEVEL, where
+`UsesAcceleratedCeiling` withholds the wider ceiling by an open owner decision rather than because
+the accelerator cannot run the mesh. `BuildRefusal` takes a `multiLevel` flag now and the two cases
+get the sentence that is true of each. **The gate is an equality**: the same taper with and without
+an explicit `MediumStack` meshes to the identical 6,543 unknowns, so the fixture isolates the ceiling
+question from every other difference a second geometry would have brought.
+
+**2. "matrix compression, which is not built" has been false since M5, in three places.** It was on
+the dense-path clause of `BuildRefusal`, on its ACCELERATED clause — where it was being said about a
+run that had the accelerator turned on — and it is the clause the brief quotes from
+`PlanarSystem.GuardCeiling`. Every ceiling refusal now names BOTH numbers and which path each
+governs, always, not only the one that happened to refuse: a reader given 30,000 and a single
+ceiling cannot tell 2.5× over from 100× over, which is the whole distance between "coarsen this" and
+"this tool cannot do it".
+
+**3. The bulk/fan split is a MEASUREMENT and the obvious estimate is wrong.** `BuildGridLines` is
+asked a second time with grading off, which is exactly the grid an edge-mesh-off run produces —
+`hardX`/`hardY` (the conductor edges) do not depend on the edge mesh and the graded attractors feed
+nothing else. Gated as an exact equality against a real edge-mesh-off mesh, and verified on the
+spiral independently (121 × 101 lines with the fan, 57 × 53 without, against an edge-mesh-off run's
+own 57 × 53). Estimating it instead — log_r of the pitch ratio times the attractor count — is wrong
+wherever the marcher's rescale or the cap enforcement moved a line, which on real artwork is most of
+them. Cost is one ungraded partition per axis, O(lines), no polygon scan, and only when grading is on.
+
+**4. "Mostly rim" needed a measured quantity, and the brief's proposed one does not exist on the
+artwork that needs it.** The brief names the pitch field's `climb` as the discriminator ("nothing new
+is measured"). `climb` is only computed when a `PlanarCurrentModel` is on — the shipped spiral runs
+at `None`, so there is no field and no `climb` — and it is in any case a statement about how far a
+fan has to climb, not about how much of the artwork is rim. What is measured instead is
+`PlanarMeshReport.RimFraction`: perimeter × bulk pitch ÷ area, over every conductor polygon's outer
+AND hole rings, clamped to 1. On a strip of width w at pitch p it is exactly 2p/w. **Taken from the
+POLYGONS, never from the mesh**, so it means the same thing with the edge mesh on and off — a
+rim fraction read off realised cell sizes would fall the moment the fan refined the rim, which is the
+one change it has to be independent of. Cost is one pass over vertices.
+
+**5. The two populations are nowhere near the threshold, from either side.** Measured: the shipped
+three-turn spiral **100.0%**, a 10 µm trace meshed 2 across **100.0%**, the 2026-08-14 Klopfenstein
+taper **5.7%**, the shipped 5.8 GHz patch **16.7%**, a 40 mm plate **1.2%**. `MostlyRimFraction` = 0.5
+is the literal reading of "mostly" and any value in 0.15–0.85 classifies all five the same way, which
+is what makes the discriminator worth having rather than the constant worth arguing about. **The one
+shape that lands near it is a single trace meshed 4 across, at 50.2%** — which is the honest answer
+for that shape, not a misclassification.
+
+**6. A warning that is flattened at the boundary is not a warning.** `PlanarMeshReport.Notes` is
+`IReadOnlyList<string>` and both consumers did `EmFindings.AsNotes(report.Notes)`, so an `EmSeverity`
+attached in the mesher could not have survived the trip to the Messages panel. The mesher's own list
+is `List<EmFinding>` now (a string still converts implicitly, so every existing `notes.Add("…")` is
+untouched), `Notes` is derived from it, and `PlanarMeshReport.AllFindings` is what
+`EmRunService.Preflight` and `PlanarKernel.Solve` read — with a fallback to "every note is a Note" so
+a report built by an older call site loses nothing.
+
+### What was built
+
+- `PlanarMeshReport.Budget` — cells, unknowns, per level, vertical, against BOTH ceilings with the
+  governing one named and the overage as a ratio, plus the grid's bulk/fan split. Inserted at
+  `Notes[0]` (a summary at the bottom of thirty sentences is not a summary) and emitted on an `Ok`
+  mesh as well as a refused one, because seeing the headroom before it runs out is most of the point.
+- `PlanarMeshReport.{Findings, AllFindings, CeilingUnknowns, AcceleratedCeiling, GridLinesX/Y,
+  BulkGridLinesX/Y, RimFraction}`.
+- `SurfaceMesher.RimFraction`, `SurfaceMesher.MostlyRimFraction`, `SurfaceMesher.BuildBudget`.
+- `BuildRefusal(..., multiLevel)`; `SurfaceMesher.GuardCeiling` and `PlanarSystem.GuardCeiling` both
+  name both ceilings. **`PlanarSystem.GuardCeiling` does NOT gain a remedy list** — it has no mesh
+  geometry left to ask which knob binds, and naming one unconditionally from there is the
+  2026-08-14 owner report's own defect in a second place. It points at the mesh report instead.
+- The panel: `AcceleratedSolveDisabledReason`'s multi-level arm is gone (the control is live on a
+  multi-level layout) and `AcceleratedSolveCeilingNote` says what it does and does not buy there —
+  speed and memory, not headroom.
+
+### Not done, on purpose
+
+- **Neither ceiling moved.** The brief excludes it and the measurements that would inform it are
+  their own work (`PlanarSystem.ResidentPhrase`, `PlanarBudgetTests`). What changed is only that a
+  user can now see 1.86× over rather than infer hopelessness from one number.
+- **`UsesAcceleratedCeiling` is untouched** — still `aimOn && !multiLevel`. P12's reason stands: the
+  bordered accelerator's TIME is set by N_z rather than by N, so a ceiling stated in N alone would
+  promise something a via field does not deliver. The refusal now says that in the user's words
+  instead of leaving it as an unexplained withholding.
+
 ## MIM-12a — the thin region's own reflections are a closed form, and the fit was extrapolating them (2026-09-16)
 
 `brief-em-mim-12a-transmitted-image-peel.md`. **MIM-12 step 0's finding 6 is built.** The kernel is

@@ -1512,22 +1512,48 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                 : null;
 
     /// <summary>
-    /// R13a, for M5's accelerator — why it is unavailable, or null when it is. <b>The multi-level
-    /// case is a refusal the ENGINE already owns</b> (<c>PlanarSolve.SolveAt</c> throws by name when
-    /// <c>Aim</c> is set on a problem needing the general kernel), so this is the panel declining to
-    /// let a user arm a run that cannot start — never a second copy of the judgement. Asking
-    /// <see cref="PlanarProblem.RequiresGeneralKernel"/> is asking the same question the engine asks.
+    /// R13a, for M5's accelerator — why it is unavailable, or null when it is.
+    ///
+    /// <para><b>MIM-13 — the multi-level arm was STALE and it disabled the control on a premise P12
+    /// retired.</b> It read "This layout needs the multi-level kernel … the accelerator models the
+    /// single-level horizontal basis family only", and its own remark cited an engine refusal in
+    /// <c>PlanarSolve.SolveAt</c> as the authority for it. That refusal is gone: P12 built
+    /// <c>PlanarBorderedAimOperator</c> for exactly this class of mesh (the horizontal prefix
+    /// projected per level pairing on one shared grid, the ẑ unknowns a dense border) and measured it
+    /// healthy to N = 15,192 at ~2.5 s a point and 327 MB against 4,927 MB dense. So the panel was
+    /// refusing to let a user arm a run that starts, runs and is faster — and telling them why in a
+    /// sentence that is no longer true. It is what a spiral-plus-capacitor report on 2026-09 reads
+    /// like from the user's side.</para>
+    ///
+    /// <para><b>What did NOT change is the CEILING</b>, and that is deliberate: a multi-level mesh is
+    /// still judged against <c>SurfaceMesher.UnknownCeiling</c> whether or not the accelerator is on
+    /// (<see cref="SurfaceMesher.UsesAcceleratedCeiling"/> — one function, so the pre-solve verdict
+    /// and the run cannot disagree). The accelerator buys time and memory here, never headroom, and
+    /// the mesh refusal says so in those words rather than this control implying it by being greyed
+    /// out. Widening that ceiling is an open owner decision with its own measurements, not this.</para>
     /// </summary>
     public string? AcceleratedSolveDisabledReason =>
         Working.AnalysisKind == EmAnalysisKind.CrossSection
             ? "The accelerated solve is part of the planar (full-wave) analysis; this setup uses the " +
               "cross-section kernel, whose solve is closed-form per frequency."
-            : PlanarProblem is { } ap && ap.RequiresGeneralKernel
-                ? "This layout needs the multi-level kernel (more than one metal level, or a via). " +
-                  "The accelerator models the single-level horizontal basis family only — a via's " +
-                  "vertical current needs its own grid kernel per height pairing, which is a separate " +
-                  "piece of work."
-                : null;
+            : null;
+
+    /// <summary>
+    /// MIM-13 — what the accelerated solve does and does not buy on THIS layout, or null when there
+    /// is nothing extra to say. A multi-level or via-bearing mesh runs accelerated but keeps the
+    /// dense unknown ceiling, and a user who turns the checkbox on to get past a refusal needs to
+    /// know that before they wait for a mesh rather than after.
+    /// </summary>
+    public string? AcceleratedSolveCeilingNote =>
+        Working.AnalysisKind != EmAnalysisKind.CrossSection
+        && PlanarProblem is { } ap && ap.RequiresGeneralKernel
+            ? "This layout carries more than one metal level, or a via. The accelerated solve runs it " +
+              $"— as a bordered system — but the unknown ceiling stays the dense one " +
+              $"({SurfaceMesher.UnknownCeiling:N0}, not {SurfaceMesher.AcceleratedUnknownCeiling:N0}): " +
+              "the accelerator's cost on a mesh like this is set by how many vertical unknowns it " +
+              "carries rather than by N, so the wider ceiling is not offered for it. Expect speed and " +
+              "memory from this, not headroom."
+            : null;
 
     /// <summary>
     /// ANT-12 — why the radiation pattern is unavailable, or null when it is. <b>Two reasons, and
@@ -1635,6 +1661,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarProblem      = null;
         OnPropertyChanged(nameof(DirectVerticalKernelDisabledReason));
         OnPropertyChanged(nameof(AcceleratedSolveDisabledReason));
+        OnPropertyChanged(nameof(AcceleratedSolveCeilingNote));
         OnPropertyChanged(nameof(DeembedDisabledReason));
         OnPropertyChanged(nameof(DeembedOutsideValidityEnabled));
         OnPropertyChanged(nameof(DeembedOutsideValidityDisabledReason));
@@ -1801,6 +1828,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarProblem = planar.Problem;
         OnPropertyChanged(nameof(DirectVerticalKernelDisabledReason));
         OnPropertyChanged(nameof(AcceleratedSolveDisabledReason));
+        OnPropertyChanged(nameof(AcceleratedSolveCeilingNote));
         OnPropertyChanged(nameof(DeembedDisabledReason));
         OnPropertyChanged(nameof(DeembedOutsideValidityEnabled));
         OnPropertyChanged(nameof(DeembedOutsideValidityDisabledReason));
@@ -1965,6 +1993,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarProblem          = null;
         OnPropertyChanged(nameof(DirectVerticalKernelDisabledReason));
         OnPropertyChanged(nameof(AcceleratedSolveDisabledReason));
+        OnPropertyChanged(nameof(AcceleratedSolveCeilingNote));
         OnPropertyChanged(nameof(DeembedDisabledReason));
         OnPropertyChanged(nameof(DeembedOutsideValidityEnabled));
         OnPropertyChanged(nameof(DeembedOutsideValidityDisabledReason));

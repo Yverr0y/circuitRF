@@ -467,9 +467,22 @@ public class PlanarFillTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => PlanarSystem.GuardCeiling(mesh.Bases.Count));
         Assert.Contains($"{SurfaceMesher.UnknownCeiling:N0}-unknown ceiling", ex.Message);
-        Assert.Contains("Lower Cells per wavelength", ex.Message);
 
         var ex2 = Assert.Throws<InvalidOperationException>(() => PlanarFill.BuildCores(mesh));
         Assert.Contains("ceiling this kernel is built for", ex2.Message);
+
+        // MIM-13 — this used to pin "Lower Cells per wavelength" on both. Neither guard may name a
+        // remedy: they have a basis count and no geometry, so they cannot ask which knob BINDS, and
+        // naming one unconditionally is the 2026-08-14 owner report's own defect (the user halved the
+        // knob the message named, saw the identical count, and stopped). What they owe instead is
+        // both ceilings — so a reader can tell 1.9× over from 100× over — and a pointer at the mesh
+        // report, where the remedies that act on the artwork in hand are written.
+        foreach (string m in new[] { ex.Message, ex2.Message })
+        {
+            Assert.DoesNotContain("Lower Cells per wavelength", m, StringComparison.Ordinal);
+            Assert.DoesNotContain("which is not built", m, StringComparison.Ordinal);
+            Assert.Contains($"{SurfaceMesher.AcceleratedUnknownCeiling:N0}", m, StringComparison.Ordinal);
+            Assert.Contains("Mesh the setup", m, StringComparison.Ordinal);
+        }
     }
 }
