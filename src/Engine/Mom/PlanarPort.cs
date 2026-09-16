@@ -2100,7 +2100,7 @@ public static class PlanarPorts
         // the maximal unbroken band of metal containing the port's own profile, on the port's own
         // level. A flare is inside it; a conductor with a gap between it and the feed is not,
         // whoever owns it. See FeedBands.
-        var bands = FeedBands(mesh, port, conn, alongX, fromLow, tLo, tHi, endRunM);
+        var bands = FeedBands(mesh, port, alongX, fromLow, tLo, tHi, endRunM);
 
         for (int ci = 0; ci < mesh.Cells.Count; ci++)
         {
@@ -2214,8 +2214,8 @@ public static class PlanarPorts
     /// level. A band that resumed there would call 250 µm of coil "the feed getting wider" and the
     /// port would measure clear while its calibration standard described nothing that exists.</para>
     /// </summary>
-    private static Dictionary<int, (int Lo, int Hi)>? FeedBands(
-        PlanarMesh mesh, PlanarPortResolution port, PlanarConductors conn,
+    internal static Dictionary<int, (int Lo, int Hi)>? FeedBands(
+        PlanarMesh mesh, PlanarPortResolution port,
         bool alongX, bool fromLow, double tLo, double tHi, double endRunM)
     {
         var gLong = alongX ? mesh.GridX : mesh.GridY;
@@ -2254,8 +2254,24 @@ public static class PlanarPorts
             if (gTran[t] >= tLo - 1e-15 && gTran[t + 1] <= tHi + 1e-15) { if (pLo < 0) pLo = t; pHi = t; }
         if (pLo < 0) return null;
 
+        // ── THE OUTERMOST CELL, WHICH IS NOT THE ONE IndexOf NAMES ON THE HIGH SIDE ─────────────
+        //
+        // `IndexOf` names the cell that STARTS at a gridline. For a port fed from the LOW side that
+        // is the feed's own outermost cell, because `OuterEdgeM` is that cell's low line. For one
+        // fed from the HIGH side `OuterEdgeM` is its outermost cell's HIGH line, so the cell IndexOf
+        // names is the one just OUTSIDE the metal — and the walk below breaks at k = 0 on a column
+        // with no metal in it and returns no band at all.
+        //
+        // It only shows when the grid runs past the port's own edge, which is why no fixture here
+        // caught it: on a layout whose outermost metal IS this port's feed, IndexOf clamps to the
+        // last cell and lands on the right one by accident. Put any metal beyond the port — another
+        // trace, a pad, a second component — and the grid extends, the band goes null, and the
+        // port's own flare is back in the neighbour class R-pcal7-1 exists to take it out of.
         int outer = IndexOf(gLong, port.OuterEdgeM);
         if (outer < 0) return null;
+        if (!fromLow && outer > 0 &&
+            Math.Abs(gLong[outer] - port.OuterEdgeM) < Math.Abs(gLong[outer + 1] - port.OuterEdgeM))
+            outer--;
 
         var bands = new Dictionary<int, (int Lo, int Hi)>();
         for (int k = 0; ; k++)

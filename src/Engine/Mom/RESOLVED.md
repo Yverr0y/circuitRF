@@ -3,6 +3,103 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## PCAL7/LFP review — the band walk started one cell out on a high-side port (2026-09-15)
+
+A review of the two briefs above, reading the code against what they say it does. One defect, two
+wording fixes, and one stale assertion that had been left red on purpose. Everything else in
+§PCAL7-OWNNET and §LFP was re-read and stands.
+
+### 1. `FeedBands` returned NO BAND AT ALL for a port fed from the HIGH side — the defect
+
+`PlanarPorts.FeedBands` walks the feed's own cross-section outward-in from the port's outermost
+CELL, and it took that cell's index from `IndexOf(gLong, port.OuterEdgeM)`. **`IndexOf` names the
+cell that STARTS at a gridline.** For a `MinX`/`MinY` port that is the feed's outermost cell, because
+`PlanarPorts.Resolve` sets `edge = gLong[outer]` there. For a `MaxX`/`MaxY` port it sets
+`edge = gLong[outer + 1]`, so the lookup names the cell just OUTSIDE the metal — the walk breaks at
+k = 0 on a column with no metal in it, `bands` comes back empty, and `MeasureFeedClearance` loses the
+whole exemption for that port.
+
+**It hides behind an accident of every fixture in the repository.** `IndexOf` CLAMPS: when the
+coordinate is at or past the grid's last line it returns `n − 1`, which IS the right cell. On a layout
+whose outermost metal is this port's own feed — `Straight`, `ViaHop`, `Bend`, `CoupledPair`,
+`PlanarLineFixtures.Taper`, every one of them — the grid ends exactly at the port, so the wrong
+arithmetic lands on the right answer. Draw anything at all past the port and it does not.
+
+**Measured** on a 700 µm line with a port at each end, `PlanarOwnNetFixtures.Mesh`:
+
+| | port 1 (MinX) | port 2 (MaxX) |
+|---|---|---|
+| bare line, grid ends at the metal | 6 band columns | 6 band columns |
+| one 10 µm island drawn at x = 800 µm | 6 band columns | **none — no band at all** |
+
+What that costs is R-pcal7-1's whole protection: own-net metal is a neighbour now, and the band is the
+only thing that keeps a taper's own flare, a pad and a bend's corner out of that class. With it gone
+a high-side port on any part that is not the last thing on the board is refused by name, quoting its
+own metal — which is the failure §PCAL7-OWNNET §4 records as the reason the band exists.
+
+**Fixed** by correcting the index rather than the walk: on the high side, take the cell whose FAR
+gridline is the drawn edge, unless the lookup already clamped onto the last cell. Gated by
+`OwnNetFeedNeighbourhoodTests.TheFeedsOwnBand_IsFoundOnAHighSidePort_WhenTheGridRunsPastIt`, which is
+red without the correction and green with it. `FeedBands` became `internal` for that gate and shed its
+unused `PlanarConductors` parameter.
+
+**The `Category=Benchmark` numbers are unmoved, structurally rather than by re-measurement.** The
+correction can only act on a `MaxX`/`MaxY` port whose grid runs past it, and there is no such port in
+the tree: the MMIC coil's two are `MinY` and `MinX`, so are every port of `Splay`, `Coupled`, `Hair50`
+and `UnevenPads`, and `Straight`, `ViaHop`, `Bend` and `CoupledPair` put their high-side ports at the
+grid's own end, where `IndexOf` clamps. The whole routine Mom tier (1,194 tests) and the whole
+`Ui.Tests` EM set (734) are green.
+
+**The gate asserts a BAND, not a clearance verdict, and that is deliberate.** Three behavioural
+fixtures were built first and all three passed with the defect in place: R-fed-1 grows the lead so the
+flare always begins at the end run's far boundary, and the clearance scan judges a cell by its
+MIDPOINT, so on Manhattan artwork and on a staircased taper the flare never reaches the window the
+band would have to rescue it from. The band earns its keep exactly where a CUT cell's `Region` reaches
+past its grid rectangle (§PCAL7-OWNNET §4's own Klopfenstein measurement) — and no fixture in this
+repository is that shape. Asserting the band directly gates the decision; inventing a fixture to make
+a verdict move would have gated the fixture.
+
+### 2. Two sentences that described the wrong thing
+
+- **`PlanarFeedExtension.FeedNote`** split its leads into "changed cross-section" and "has a
+  neighbour" with `anySection = leads.Any(l => !l.GrownForNeighbour)`, which counts a lead grown ONLY
+  to match a peer's — R-pcal7-3's equalisation — as a report about that port's own cross-section. The
+  lead's own clause already says what it is; the summary now excludes it from both halves.
+- **`PlanarSolve.PassivityExcesses`** carried two `<summary>` blocks in one doc comment (the
+  measurement's, then the note's, with the note left undocumented). Merged. No warning fired because
+  `src/Engine` does not generate a documentation file — which is worth knowing, since
+  `TreatWarningsAsErrors` is on there and gave no cover at all.
+
+### 3. `PlanarRunTests.TheQuasiStaticZcCaveat_IsInTheRunsNotes` — re-pointed, not left red
+
+§LFP §8 reported this as red at HEAD and left it alone, on the reasoning that re-pointing someone
+else's assertion is how a note's wording changes twice without anyone deciding to. The reasoning is
+sound and the outcome was not: `dotnet test tests/Ui.Tests` fails on it, so the routine gate for the
+whole UI project is red for a reason unrelated to anything anyone is working on.
+
+It is stale rather than in dispute. PEEL §6b rewrote `PlanarKernel.QuasiStaticNote` on 2026-09-14 on
+an explicit owner instruction — plain terms, no block capitals — and re-pointed `PlanarDcPointTests`'
+phrase; this assertion still asked for `"QUASI-STATIC"` and `"+6.3% at 20 GHz"` against a note that
+says "quasi-static estimate" and "6% at 20 GHz". Re-pointed at the part of the note a rewrite is not
+free to drop — that the reported Z_c is an ESTIMATE, and the frequency the caveat is worst at.
+
+### 4. Read and NOT changed — two asymmetries worth knowing about before touching this again
+
+- **`NeighbourhoodRun`'s band is ONE POLYGON's span; `FeedBands`' is the mesh's CONTIGUOUS METAL.**
+  `FeedSpan` returns the first polygon whose span at a station contains the port's midpoint, so two
+  ABUTTING polygons on the port's own level read as a feed plus a neighbour at zero clearance, while
+  after meshing they are one unbroken band and are exempt. Nothing in `src/Design` unions a layer's
+  polygons, so a feed drawn as two touching rectangles is reachable. **The disagreement runs the safe
+  way** — a lead grown that nothing needed, peeled exactly, costing mesh rather than accuracy — which
+  is the opposite direction from the one `NeighbourhoodRun`'s own doc comment discusses. Not fixed
+  because merging the spans would move lead lengths on the fixtures whose nH values §PCAL7-OWNNET
+  pins, and re-measuring them is the 5.5-minute benchmark tier.
+- **Within one pass, a port's neighbourhood scan sees the leads of ports measured BEFORE it**
+  (`PolysOn` reads `edited`), so the first pass is order-dependent. The fixed-point step then asks the
+  question again from every port's new outer edge on the fully grown problem, which is what the
+  verdict is actually taken from, so the asymmetry cannot survive into a published answer — it can
+  only make a first-pass lead longer than it needed to be.
+
 ## LFP — the low-frequency wall is the PORT, measured; two routes refuted and the guard that was silent (2026-09-15)
 
 `docs/sonnet-briefs/brief-em-lf2-port-discontinuity-as-a-lumped-element.md`. Owner report: commercial

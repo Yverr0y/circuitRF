@@ -1004,8 +1004,12 @@ public static class PlanarFeedExtension
                 : l.ExistingUniformM > 0 ? $" (on top of {fmt(l.ExistingUniformM)} it already had)"
                                          : ""));
 
+        // A lead grown only to match a PEER's is neither of the two things this sentence names, and
+        // its own clause already says so — so it must not be counted into either half, or a run
+        // where one port's lead was equalised reads as a report about that port's cross-section.
         bool anyNeighbour = leads.Any(l => l.GrownForNeighbour);
-        bool anySection   = leads.Any(l => !l.GrownForNeighbour);
+        bool anySection   = !anyNeighbour
+                         || leads.Any(l => !l.GrownForNeighbour && !l.GrownForPeer);
 
         string why =
             anyNeighbour && anySection

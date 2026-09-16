@@ -190,13 +190,23 @@ public class PlanarRunTests(PlanarRunFixture fixture) : IClassFixture<PlanarRunF
                         n => n.Contains("explicitly", StringComparison.Ordinal));
     }
 
-    /// <summary>§0's third finding, surfaced rather than published as if it were dispersion.</summary>
+    /// <summary>
+    /// §0's third finding, surfaced rather than published as if it were dispersion.
+    ///
+    /// <para><b>Re-pointed at the note's current wording.</b> PEEL §6b rewrote
+    /// <c>PlanarKernel.QuasiStaticNote</c> on 2026-09-14 — plain terms, no block capitals, the
+    /// fixture moved into the doc comment — and re-pointed <c>PlanarDcPointTests</c>' phrase but not
+    /// this one, which went on asserting <c>"QUASI-STATIC"</c> and <c>"+6.3% at 20 GHz"</c> against a
+    /// note that says neither. What it asks for now is the part of that note a rewrite is not free to
+    /// drop — that the reported Z_c is an ESTIMATE, and the frequency the caveat is worst at — rather
+    /// than a second copy of the sentence.</para>
+    /// </summary>
     [Fact]
     public void TheQuasiStaticZcCaveat_IsInTheRunsNotes()
     {
         Assert.Contains(fixture.Result.Notes ?? [], n =>
-            n.Contains("QUASI-STATIC", StringComparison.Ordinal) &&
-            n.Contains("+6.3% at 20 GHz", StringComparison.Ordinal));
+            n.Contains("quasi-static estimate", StringComparison.Ordinal) &&
+            n.Contains("20 GHz", StringComparison.Ordinal));
     }
 
     [Fact]

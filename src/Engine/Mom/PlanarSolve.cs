@@ -4279,12 +4279,9 @@ public static class PlanarSolve
     /// it of the shipped matrix directly would flag perfectly passive networks.</para>
     ///
     /// <para><b>The measurement and the sentence are two functions since R-pcal7-4</b>, because the
-    /// answer is needed as DATA as well as as prose — see below, and
-    /// <c>EmSnpProvenance.ValidityCaveats</c>.</para>
-    /// </summary>
-    /// <summary>
-    /// <b>Every de-embedded point that cannot be a network</b>, ascending in frequency. The
-    /// measurement the note below used to make and throw away.
+    /// answer is needed as DATA as well as as prose. THIS one is the measurement: every de-embedded
+    /// point that cannot be a network, ascending in frequency; <see cref="PassivityNote"/> below is
+    /// the prose, and <c>EmSnpProvenance.ValidityCaveats</c> is the other reader.</para>
     ///
     /// <para><b>R-pcal7-4 — it is returned as data because the note does not survive the file.</b>
     /// That is PCAL2's own finding one step further on: a `.sNp` on disk carries no notes, and the

@@ -104,6 +104,71 @@ public sealed class OwnNetFeedNeighbourhoodTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// <b>The feed's own cross-section is found on a HIGH-SIDE port too, when the layout carries
+    /// metal beyond it.</b>
+    ///
+    /// <para><c>FeedBands</c> starts its walk at the outermost cell of the port's own feed, and the
+    /// index of that cell is NOT the index a coordinate lookup returns for a port fed from the high
+    /// side: the lookup names the cell that STARTS at a gridline, while the feed's outermost cell is
+    /// the one that ENDS there. The two coincide — by accident — whenever the port's own metal is the
+    /// outermost metal in the layout, because the lookup then clamps onto the last cell; and that is
+    /// true of every fixture in this file and of the taper above. Draw anything past the port and the
+    /// grid extends, the walk starts on a column of empty space, breaks at once, and the whole
+    /// exemption returns <c>null</c> — which puts the port's own flare straight back into the
+    /// neighbour class R-pcal7-1 exists to take it out of.</para>
+    ///
+    /// <para>Asserted on the band directly rather than on a clearance verdict, because the band only
+    /// has to hold a verdict up where a rim cell's own metal reaches past its grid rectangle, and no
+    /// fixture here is that shape. The band is the decision; whether a given rim needs it is the
+    /// geometry's business.</para>
+    /// </summary>
+    [Fact]
+    public void TheFeedsOwnBand_IsFoundOnAHighSidePort_WhenTheGridRunsPastIt()
+    {
+        var line   = PlanarLineFixtures.Line(GroundedSlab.Fr4Starter, 2.9e-3, 40e-3, 5e9);
+        var tPorts = PlanarLineFixtures.EndPorts(line);
+
+        // Far enough out to change nothing but where the grid ends — past any lead either port
+        // grows and well outside the passive clearance across the feed — and WIDER than the line, so
+        // it does not become the narrowest run and re-pitch the whole grid.
+        var withIsland = line with
+        {
+            Layers = [line.Layers[0] with
+            {
+                Polygons = [.. line.Layers[0].Polygons,
+                            PlanarLineFixtures.Rect(60e-3, 40e-3, 64e-3, 44e-3)],
+            }],
+        };
+
+        static IReadOnlyList<int> BandColumnsOfPort2(PlanarProblem problem, PlanarPort[] ports)
+        {
+            var cal = PlanarCalibrationSettings.Default;
+            var (grown, leads, _) = PlanarFeedExtension.Extend(problem, ports, cal);
+            var report = SurfaceMesher.Mesh(grown, PlanarLineFixtures.Coarse, leads: leads);
+            var p = PlanarPorts.ResolveAll(report.Mesh, ports).Single(q => q.Number == 2);
+
+            var bands = PlanarPorts.FeedBands(
+                report.Mesh, p,
+                alongX: p.Direction == PlanarBasisDirection.X,
+                fromLow: p.Side is PlanarPortSide.MinX or PlanarPortSide.MinY,
+                tLo: p.TransverseLines[0], tHi: p.TransverseLines[^1],
+                endRunM: cal.EndRunHeights * problem.Slab.HeightM);
+
+            return bands is null ? [] : [.. bands.Keys.Order()];
+        }
+
+        var bare   = BandColumnsOfPort2(line,       tPorts);
+        var island = BandColumnsOfPort2(withIsland, tPorts);
+        _out.WriteLine($"port 2 band columns: {bare.Count} bare, {island.Count} with an island past it");
+
+        // NOT the same COUNT: a second polygon is a second run for the per-axis pitch rule, so the
+        // grid it lands on is finer along x and the same end run is more columns of it. What the
+        // defect did was return NO band at all.
+        Assert.NotEmpty(bare);
+        Assert.NotEmpty(island);
+    }
+
+    /// <summary>
     /// <b>The port's own net running BESIDE the feed is a neighbour, at the DRIVEN threshold.</b>
     /// The whole defect: on all three of these the metal is the port's own conductor, it is
     /// separated from the feed by a gap, and PCAL2 used to report the feed clear.
