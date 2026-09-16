@@ -214,11 +214,25 @@ public static class CrossSectionExtractor
         // conductor and refuses multi-level geometry outright, so "the plate is drawn but excluded"
         // is not a state this kernel can be in, and passing null is the accurate answer rather than
         // an omission.
+        //
+        // MIM-11 — and the tie may name a MASK instead, which this extractor must honour for the
+        // reason above restated: if it did not, the shipped MMIC technology's re-pointed tie would
+        // resolve to nothing here, the film would stay ACTIVE on its typo path, and every closed-form
+        // microstrip on the metal below it would move — silently, and only on this one code path.
+        // The mask question is the same one either extractor asks, in its own words: does THIS
+        // geometry draw the layer? A uniform-line cross-section is handed the same shapes.
+        var maskLayers = PatternedDielectric.MaskLayers(tech);
+        var maskDrawn  = shapes.Where(sh => sh is not (LabelShape or BitmapShape))
+                               .Select(sh => maskLayers.TryGetValue(sh.Layer, out var n) ? n : null)
+                               .Where(n => n is not null)
+                               .ToHashSet(StringComparer.Ordinal)!;
+
         var dielectricFindings = new List<EmFinding>();
         var effective = PatternedDielectric.Deactivate(
                 tech.Stackup,
                 name => string.Equals(name, signal.Layer.Name, StringComparison.Ordinal),
-                revertSheetSurface: false, dielectricFindings);
+                revertSheetSurface: false, dielectricFindings, null,
+                new PatternedFilmMask(tech.Layers, n => maskDrawn.Contains(n)));
         notes.AddRange(dielectricFindings.Select(x => x.Text));
         if (effective is { } effectiveStackup)
         {

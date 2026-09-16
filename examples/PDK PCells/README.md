@@ -251,14 +251,27 @@ spiral crowds on the inside of each ninety-degree bend, and a forty-five-degree 
 | Metal2 | the strap that carries the top plate away |
 | `MIM Via` | the post up to it |
 | `MIM Metal` | the top plate — `W` × `L`, and the plate that sets `C` |
-| *MIM Dielectric* | **not drawn** — 0.2 µm of εr 6.8, present wherever the top plate is |
+| `Nitride` | the MASK that opens the film, enclosing the top plate |
+| *MIM Dielectric* | **not drawn** — 0.2 µm of εr 6.8, the stackup band the solver reads |
 | Metal1 | the bottom plate, which encloses the top plate by one minimum feature |
 | `Backside Via` | in `Shunt` only — through the wafer to the metal on the back |
 
-Open the technology and look at `MIM Dielectric`: it carries **no drawing layer at all** and is
-declared `PresentWithLayer: MIM Metal`. Drawing the top plate is what puts it there. A generator that
-helpfully drew one as well would stack a second insulator under the first, and the artwork would look
-exactly the same.
+**The insulator appears twice and only one of the two is drawable.** `Nitride` is the MASK: this
+process streams it out as its own layer and the plate is deposited on whatever it left, so a `.gds`
+written without it is not manufacturable and a DRC deck pointed at it has nothing to check. Open the
+technology and look at `MIM Dielectric` and you will see the other half — it carries **no drawing
+layer at all** and is declared `PresentWithLayer: Nitride`, because it is the stackup BAND the field
+solver reads rather than a shape. Drawing the mask is what puts that band in an EM run. There is
+still exactly one insulator: a generator that also drew a shape for the band itself would stack a
+second under the first, and the artwork would look exactly the same.
+
+**That band is laterally infinite inside a run**, whatever the mask says — the 2.5D formulation has
+no way to make a dielectric finite in x and y, so an EM run that carries the film carries it over
+every square micron of the layout. circuitRF says so in the run's own notes, with the fraction of the
+layout the nitride actually covers, and the error it introduces on ordinary Metal1 interconnect is a
+tenth of a degree of phase and a few per cent of a fringing capacitance. The run also reports the
+other half of that trade: with the film present, Metal1's analysis sheet sits on the TOP of its band,
+so every Metal1 conductor in the layout is modelled at 103 µm rather than 100.
 
 **The top plate can only leave upwards.** `MIM Via` spans MIM Metal to Metal2 and nothing in this
 stackup spans MIM Metal to Metal1, so the escape is the spiral's crossover one storey higher: a post
@@ -361,9 +374,10 @@ The four steps, on this workspace's own spiral:
 1. **Take the capacitor instance out of the layout** and put an edge port on the landing pad it was
    abutting. `SpiralInductor.clay` as it ships is exactly that: port 2 is on the coil's inner
    terminal, where a series `KIT_MIMCAP` attaches.
-2. **Run the EM setup, over a band that starts above about 1 GHz.** With no plate level in the run
-   the capacitor dielectric enters the medium as air — it is declared `PresentWithLayer: MIM Metal`,
-   and that layer is not there — so the structure is ordinary Metal1/Metal2 interconnect, two levels
+2. **Run the EM setup, over a band that starts above about 1 GHz.** With the capacitor gone the
+   layout draws no nitride, so the capacitor dielectric enters the medium as air — it is declared
+   `PresentWithLayer: Nitride`, and that mask is not there — and the structure is ordinary
+   Metal1/Metal2 interconnect, two levels
    6 µm apart. The run reports it: cell/separation of order 3, nowhere near the 40 the refusal is at.
    The lower edge matters and is the second bound below.
 3. **Read the port order off the file.** The `.s2p` header names it — `circuitRF-EM port 1: '1' on

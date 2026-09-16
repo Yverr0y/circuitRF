@@ -1022,14 +1022,17 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     }
 
     /// <summary>
-    /// <b>The MIM capacitor is a three-storey cell, and one of its four storeys is drawn by not
-    /// drawing it.</b>
+    /// <b>The MIM capacitor is a three-storey cell, and the insulator between two of those storeys
+    /// is drawn ONCE — as a mask.</b>
     ///
-    /// <para>Metal1 is the bottom plate; <c>MIM Metal</c> is the top plate 0.2 µm above it; the
-    /// <c>MIM Dielectric</c> between them carries NO drawing layer at all and is declared
-    /// <c>PresentWithLayer: MIM Metal</c> in the stackup, so drawing the top plate is what puts it
-    /// there. A generator that helpfully drew one as well would stack a second insulator under the
-    /// first, and the artwork would look exactly the same.</para>
+    /// <para>Metal1 is the bottom plate; <c>MIM Metal</c> is the top plate 0.2 µm above it. The
+    /// insulator appears twice in the technology and only one of the two is drawable, which is the
+    /// part worth getting right: <c>Nitride</c> is the MASK the process streams out, and a
+    /// <c>.gds</c> written without it is not manufacturable and gives a DRC deck nothing to check;
+    /// <c>MIM Dielectric</c> is the stackup BAND the field solver reads, it carries no drawing layer
+    /// at all, and it is declared <c>PresentWithLayer: Nitride</c> — so drawing the mask is what
+    /// puts the band in a run (MIM-11). A generator that also drew a shape for the band would stack
+    /// a second insulator under the first, and the artwork would look exactly the same.</para>
     ///
     /// <para>The escape is the spiral's crossover one storey higher, and it is not a stylistic
     /// choice: <c>MIM Via</c> spans MIM Metal to Metal2 and nothing in this stackup spans MIM Metal
@@ -1037,8 +1040,9 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     /// Metal1–Metal2 post, which is what puts both terminals on one layer.</para>
     /// </summary>
     [PythonFact]
-    public void TheSeriesMimCapIsMetal1AndMimMetal_WithNothingDrawnForTheDielectric()
+    public void TheSeriesMimCapIsMetal1AndMimMetal_WithTheNitrideDrawnAsAMask()
     {
+        var nitride  = new LayerKey(6, 0);
         var mimMetal = new LayerKey(9, 0);
         var mimVia   = new LayerKey(10, 0);
 
@@ -1047,13 +1051,23 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
         var result = generate(kit.DeclaredDefaults(MimCap)!, Tech(), PCellLayerSelection.Default);
 
         var layers = result.Shapes.Select(sh => sh.Layer).ToHashSet();
-        Assert.Equal([Metal1, Metal2, Via, mimMetal, mimVia], layers.OrderBy(k => k.Layer).ToArray());
+        Assert.Equal([Metal1, Metal2, Via, nitride, mimMetal, mimVia],
+                     layers.OrderBy(k => k.Layer).ToArray());
+
+        // MIM-11 — the mask ENCLOSES the top plate, which is the rule that matters: a plate whose
+        // edge ran past the nitride would sit straight on the bottom plate and short it.
+        var mask = Assert.Single(result.Shapes.OfType<RectShape>().Where(r => r.Layer == nitride));
+        var plate = Assert.Single(result.Shapes.OfType<RectShape>().Where(r => r.Layer == mimMetal));
+        Assert.True(Math.Min(mask.X1, mask.X2) <= Math.Min(plate.X1, plate.X2));
+        Assert.True(Math.Max(mask.X1, mask.X2) >= Math.Max(plate.X1, plate.X2));
+        Assert.True(Math.Min(mask.Y1, mask.Y2) <= Math.Min(plate.Y1, plate.Y2));
+        Assert.True(Math.Max(mask.Y1, mask.Y2) >= Math.Max(plate.Y1, plate.Y2));
 
         // The bottom plate ENCLOSES the top plate — the enclosure is a process rule, not a
         // parameter, which is why W x L is declared as the top plate and the bottom one is grown.
         var bottom = result.Shapes.OfType<RectShape>().Where(r => r.Layer == Metal1)
                                   .MaxBy(r => Math.Abs((r.X2 - r.X1) * (r.Y2 - r.Y1)))!;
-        var top    = Assert.Single(result.Shapes.OfType<RectShape>().Where(r => r.Layer == mimMetal));
+        var top    = plate;
         Assert.True(Math.Min(bottom.X1, bottom.X2) < Math.Min(top.X1, top.X2));
         Assert.True(Math.Max(bottom.X2, bottom.X1) > Math.Max(top.X2, top.X1));
         Assert.True(Math.Min(bottom.Y1, bottom.Y2) < Math.Min(top.Y1, top.Y2));

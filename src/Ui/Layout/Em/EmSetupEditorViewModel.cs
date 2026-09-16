@@ -2340,8 +2340,15 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
                     $"εr {l.Epsr.ToString("G4", CultureInfo.InvariantCulture)} · " +
                     $"tanδ {l.TanD.ToString("G4", CultureInfo.InvariantCulture)} · " +
                     $"µr {l.Mur.ToString("G4", CultureInfo.InvariantCulture)}" +
+                    // MIM-11 — which namespace the tie resolved in decides what would switch the
+                    // film on, and the two remedies are different actions: a conductor tie wants a
+                    // LEVEL added to this setup, a mask tie wants the mask DRAWN. One sentence for
+                    // both would send half the readers to the wrong control.
                     (l.PresentWithLayer is { Length: > 0 } plate
-                        ? $" · patterned with {plate} (air unless that level is analysed)"
+                        ? tech.Stackup.Layers.Any(c => c.Kind == StackupKind.Conductor &&
+                                                       c.Name == plate)
+                            ? $" · patterned with {plate} (air unless that level is analysed)"
+                            : $" · patterned by the {plate} mask (air unless the layout draws it)"
                         : ""),
                 StackupKind.Conductor =>
                     $"σ {l.SigmaSm.ToString("G4", CultureInfo.InvariantCulture)} S/m" +

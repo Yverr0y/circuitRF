@@ -105,7 +105,7 @@ public sealed class TechEditorHelpAndStackupSummaryTests
     /// </summary>
     [Theory]
     [InlineData("SheetAt",     "Metal thickness goes to:", "has no thickness for metal")]
-    [InlineData("PresentWith", "Patterned with:",          "the conductor it is deposited under")]
+    [InlineData("PresentWith", "Patterned with:",          "what says where it is")]
     public void TheLabel_CarriesTheSameExplanationAsTheControlBesideIt(
         string constant, string label, string fragment)
     {

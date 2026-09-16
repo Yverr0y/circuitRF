@@ -1555,6 +1555,28 @@ and is built (MIM-1, 2026-08-30).
    > 102.75 µm instead of 103, because the module put 0.25 µm of plate METAL where air was and only
    > dielectric bands are summed. Write-ups: `src/Design/RESOLVED.md`, `src/Ui/RESOLVED.md` §MIM-7.
 
+   > **Amended at MIM-11 (2026-09-16): `PresentWithLayer` resolves in TWO namespaces, and the
+   > shipped MMIC technology's tie names the nitride MASK.** A CONDUCTOR stackup entry first,
+   > exactly as above and with priority, so every technology authored against MIM-7 extracts bit for
+   > bit as it did; otherwise a DRAWING LAYER, in which case "in this run" means "this run's layout
+   > carries artwork on that layer". The plate was always a proxy — on this process the insulator is
+   > streamed out as its own mask and the plate is deposited on what that mask left — and the proxy
+   > could not express a mask-only structure at all. `KIT_MIMCAP` now draws the nitride, which is
+   > also what makes a `.gds` off this kit manufacturable and gives a DRC deck something to check.
+   > One consequence is deliberate: a layout that draws the mask carries the film whether or not the
+   > plate LEVEL is in the run, because excluding a level does not etch a wafer. The capacitor's
+   > absence from such a run is still reported, by the extractor's own dropped-artwork warnings.
+   >
+   > **And a carried film now SAYS it is laterally infinite, with a number.** The medium string is a
+   > correct list of bands and nowhere said that the 0.2 µm εᵣ 6.8 one is present over the whole
+   > plane; the run's notes now say it, with the fraction of the layout's extent the defining artwork
+   > covers, plus the paired sheet move (Metal1 at 103 µm rather than 100 — MIM-6 working as
+   > designed, the same order of effect, and invisible in every other report). Measured size of the
+   > approximation on a Metal1 line: max |ΔS| 2.26e-3, S₁₁ phase +0.108°, a gap capacitance −2.68 %.
+   > **Making the film laterally FINITE is not deferred — it cannot be done in this kernel**, which
+   > is built on laterally infinite strata; the routes that exist elsewhere are a different solver.
+   > Write-up: `src/Design/RESOLVED.md` §MIM-11.
+
    **Two findings on the physics, and the second is the important one.** (a) A level is a sheet at
    the BOTTOM of its conductor band, so the modelled plate separation is the dielectric PLUS the
    lower plate's own metal thickness — 3.2 µm, not 0.2 µm. **> Built at MIM-6 (2026-08-30): a

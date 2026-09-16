@@ -1044,7 +1044,13 @@
                                                  air in its place, so one technology can carry a
                                                  capacitor module and still solve ordinary
                                                  interconnect unchanged. "(none)" is a continuous
-                                                 dielectric and is what every other entry means. -->
+                                                 dielectric and is what every other entry means.
+
+                                                 MIM-11. The list is BOTH namespaces the tie
+                                                 resolves in: the stackup's conductors first, then
+                                                 the technology's drawing layers - a MASK, which on
+                                                 a real process is the thing that actually defines
+                                                 where the film is. -->
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsDielectric}">
                                                 <TextBlock Text="{x:Static lay:StackupCardText.PresentWith}" Width="86" FontSize="11"
                                                            VerticalAlignment="Center" TextWrapping="Wrap"

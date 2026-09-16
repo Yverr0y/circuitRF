@@ -246,7 +246,7 @@
         "SigmaSm": 0,
         "DrawingLayers": [],
         "IsGroundReference": false,
-        "PresentWithLayer": "MIM Metal"
+        "PresentWithLayer": "Nitride"
       },
       {
         "Kind": "Conductor",

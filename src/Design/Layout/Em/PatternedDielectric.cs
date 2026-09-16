@@ -15,13 +15,101 @@
 // and only the planar one has a sheet surface to revert, because only it solves a conductor as a
 // zero-thickness sheet — the cross-section kernel models real metal of real thickness and does not
 // read SheetAt at all (MIM-6's own recorded decision).
+//
+// ── MIM-11 — THE TIE MAY NAME A MASK, AND THAT IS THE NAME THAT IS TRUE ──────────────────────────
+//
+// MIM-7 tied the film to its PLATE conductor because the plate is what a run's level list talks
+// about, and on this process that is a proxy: what actually defines where a thin film exists is the
+// nitride mask the fab streams out, and the plate is deposited on top of what that mask left. The
+// proxy was load-bearing in one direction only — a layout with no plate on it has no film — and it
+// broke down the moment the mask itself became drawable (MIM-11 item 1): a nitride-only structure
+// could not be expressed at all, because the film's presence was a statement about a different
+// layer.
+//
+// So `PresentWithLayer` now resolves in TWO namespaces, and the precedence is the load-bearing part:
+// a CONDUCTOR stackup entry first, exactly as before, so every technology authored against MIM-7
+// resolves the same name to the same rule and extracts bit for bit as it did; a DRAWING LAYER
+// second, in which case "in this run" means "this run's layout carries artwork on that layer".
+//
+// WHAT DOES NOT CHANGE. It is still a per-run ON/OFF and never a lateral pattern. Inside a run every
+// dielectric is laterally infinite — that is the 2.5D formulation and not a limitation of this file
+// — so a drawn nitride polygon does not make the film finite, it only decides whether the film is in
+// the medium at all. MIM-11's own measurement of what that costs is in src/Design/RESOLVED.md, and
+// PlanarExtractor says it in the run's own notes with the coverage fraction attached.
 
 using CircuitRF.Engine.Mom;
 
 namespace CircuitRF.Design.Layout.Em;
 
+/// <summary>
+/// MIM-11 — the DRAWING-LAYER half of a <see cref="StackupLayer.PresentWithLayer"/> tie: the
+/// technology's own layer table, and the one question a run can answer about it.
+/// </summary>
+/// <param name="DrawingLayers">The technology's <see cref="Technology.Layers"/>, which is the
+/// namespace a tie falls through to when no CONDUCTOR entry carries the name.</param>
+/// <param name="HasArtwork">Does this run's layout draw anything on the named layer? This is the
+/// mask spelling of "the capacitor is in this run", and it is the caller's to answer because only
+/// the caller has walked the shapes.</param>
+internal readonly record struct PatternedFilmMask(
+    IReadOnlyList<LayerDef> DrawingLayers,
+    Func<string, bool>      HasArtwork);
+
+/// <summary>
+/// MIM-11 — one patterned film this run CARRIES, reported back so the caller can say so.
+///
+/// <para>A film that was deactivated already produces a note here; a film that is PRESENT produced
+/// nothing at all, which is the silence MIM-11 item 3 closes — the medium string lists the band
+/// correctly and nowhere says it is laterally infinite. The extractor needs three things to write
+/// that sentence and only the first is in the stackup, so they travel together.</para>
+/// </summary>
+/// <param name="Film">The dielectric entry, at its stated material — not the air clone.</param>
+/// <param name="Tie">The name <see cref="StackupLayer.PresentWithLayer"/> carries.</param>
+/// <param name="TieIsMask">True when <paramref name="Tie"/> resolved as a DRAWING layer rather than
+/// as a conductor stackup entry — which decides which artwork the coverage fraction is measured
+/// over, and which sentence tells the reader how to turn the film off.</param>
+/// <param name="SheetRaisedConductor">The conductor directly beneath the film whose
+/// <see cref="StackupLayer.SheetAt"/> is <see cref="ConductorSheetSurface.Top"/> — i.e. the one
+/// whose analysis sheet this carried film LEAVES at the top of its band, where deactivating would
+/// have put it back on the bottom. Null when there is no such conductor. MIM-11 measured this as the
+/// same order of effect as the film itself (Z_c +0.77 % on a Metal1 line), and it is invisible in
+/// every other report.</param>
+internal readonly record struct CarriedFilm(
+    StackupLayer Film, string Tie, bool TieIsMask, string? SheetRaisedConductor);
+
 internal static class PatternedDielectric
 {
+    /// <summary>
+    /// <b>The drawing layers this technology's ties name</b>, by <see cref="LayerKey"/> — empty for
+    /// every technology whose ties all name conductors, which is every technology authored before
+    /// MIM-11.
+    ///
+    /// <para>Exposed so the caller can collect that artwork while it walks the shapes ONCE, and so
+    /// the two-namespace precedence is written here rather than restated at a call site: a name that
+    /// a conductor entry carries is a conductor tie and never a mask one, whatever else is called
+    /// that.</para>
+    /// </summary>
+    public static IReadOnlyDictionary<LayerKey, string> MaskLayers(Technology tech)
+    {
+        var map = new Dictionary<LayerKey, string>();
+        if (tech.Stackup is null) return map;
+
+        foreach (var film in tech.Stackup.Layers)
+        {
+            if (film.Kind != StackupKind.Dielectric ||
+                film.PresentWithLayer is not { Length: > 0 } tie) continue;
+            if (NamesAConductor(tech.Stackup, tie)) continue;
+
+            foreach (var l in tech.Layers)
+                if (string.Equals(l.Name, tie, StringComparison.Ordinal))
+                    map[l.Key] = tie;
+        }
+        return map;
+    }
+
+    private static bool NamesAConductor(Stackup stackup, string name) =>
+        stackup.Layers.Any(l => l.Kind == StackupKind.Conductor &&
+                                string.Equals(l.Name, name, StringComparison.Ordinal));
+
     /// <summary>
     /// <b>Rebuilds <paramref name="stackup"/> with every tied dielectric whose plate is not in this
     /// run turned into air, or returns <c>null</c> when there is nothing to do</b> — in which case
@@ -44,9 +132,17 @@ internal static class PatternedDielectric
     /// interconnect. Reverting it is what makes an interconnect run on a technology carrying the
     /// module BIT-identical to the same run on one without it, rather than merely close.</para>
     ///
-    /// <para><b>A tie naming a conductor the stackup does not have leaves the film ACTIVE</b> and
-    /// says so. Deactivating on a typo would silently thin the medium, which is the failure this
-    /// whole mechanism exists to avoid.</para>
+    /// <para><b>MIM-11 — <paramref name="mask"/> is the second namespace</b>, and the tie resolves
+    /// in it only when no CONDUCTOR entry carries the name. A mask tie asks whether the layout DRAWS
+    /// the layer, which is the true statement of where a thin film is (the nitride is a mask; the
+    /// plate is deposited on what it left), where the plate was always a proxy for it. Omit it and
+    /// this behaves exactly as MIM-7 wrote it. <paramref name="carried"/> collects the films that
+    /// came out PRESENT, so the caller can say what the laterally-infinite approximation costs on
+    /// this layout — which nothing said before MIM-11 item 3.</para>
+    ///
+    /// <para><b>A tie naming neither a conductor entry nor a drawing layer leaves the film
+    /// ACTIVE</b> and says so. Deactivating on a typo would silently thin the medium, which is the
+    /// failure this whole mechanism exists to avoid.</para>
     ///
     /// <para>Nothing here touches the kernel: a hand-authored stack whose dielectric genuinely is
     /// everywhere still meets every refusal it always did.</para>
@@ -64,7 +160,8 @@ internal static class PatternedDielectric
     /// </list></param>
     public static Stackup? Deactivate(
         Stackup stackup, Func<string, bool> isInRun, bool revertSheetSurface,
-        List<EmFinding> notes, Func<string, bool>? plateHasArtwork = null)
+        List<EmFinding> notes, Func<string, bool>? plateHasArtwork = null,
+        PatternedFilmMask? mask = null, List<CarriedFilm>? carried = null)
     {
         if (!stackup.Layers.Any(l => l.Kind == StackupKind.Dielectric &&
                                      l.PresentWithLayer is { Length: > 0 }))
@@ -79,17 +176,44 @@ internal static class PatternedDielectric
             if (film.Kind != StackupKind.Dielectric || film.PresentWithLayer is not { Length: > 0 } plate)
                 continue;
 
-            if (!stackup.Layers.Any(l => l.Kind == StackupKind.Conductor &&
-                                         string.Equals(l.Name, plate, StringComparison.Ordinal)))
+            // ── MIM-11 — which namespace the tie resolved in, CONDUCTOR first ────────────────
+            //
+            // Conductor first is not a preference: it is what makes every MIM-7 technology extract
+            // bit for bit as it did, whatever a drawing layer happens to be called. A name in
+            // neither namespace is the typo case below, unchanged.
+            bool tiedToConductor = NamesAConductor(stackup, plate);
+            bool tiedToMask      = !tiedToConductor && mask is { } m &&
+                                   m.DrawingLayers.Any(l => string.Equals(l.Name, plate,
+                                                                          StringComparison.Ordinal));
+
+            if (!tiedToConductor && !tiedToMask)
             {
-                notes.Add($"Dielectric '{film.Name}' says it is patterned with conductor '{plate}', " +
-                          "which this technology has no stackup entry for. It is carried into the " +
+                notes.Add($"Dielectric '{film.Name}' says it is patterned with '{plate}', which this " +
+                          "technology has neither a conductor stackup entry nor a drawing layer for. " +
+                          "It is carried into the " +
                           "medium as stated rather than dropped — a broken tie must not silently thin " +
                           "the stack. Fix the name in the technology editor's Stackup tab.");
                 continue;
             }
 
-            if (isInRun(plate)) continue;               // the capacitor IS in this run
+            // The two namespaces ask different questions and both mean "is the capacitor in this
+            // run": a conductor tie asks whether the PLATE is an analysis level, a mask tie asks
+            // whether the layout DRAWS the mask that defines the film.
+            bool present = tiedToConductor ? isInRun(plate) : mask!.Value.HasArtwork(plate);
+
+            if (present)
+            {
+                // MIM-11 item 3 — a carried film is reported to the caller, which is the only place
+                // that can measure how much of the layout it actually covers and say so. The
+                // sheet-surface half is answered HERE because `Beneath` is this file's rule and a
+                // second reading of it at a call site would be the drift this file exists to avoid.
+                carried?.Add(new CarriedFilm(
+                    film, plate, tiedToMask,
+                    revertSheetSurface && Beneath(layers, i) is
+                        { Kind: StackupKind.Conductor, SheetAt: ConductorSheetSurface.Top } raised
+                        ? raised.Name : null));
+                continue;
+            }
 
             var air = Clone(film);
             air.Epsr = 1.0;
@@ -113,7 +237,21 @@ internal static class PatternedDielectric
 
             // The sentence splits on ONE question and the extractor knows the answer to it. Both
             // halves state the same mechanism; what differs is whether it is the right outcome.
-            notes.Add(plateHasArtwork is not null && plateHasArtwork(plate)
+            //
+            // MIM-11 — a MASK tie takes neither half, and that is not an omission. Both of those
+            // sentences end by naming an analysis level to add, which is the remedy for a tie to a
+            // CONDUCTOR; a mask tie's question is whether the mask is DRAWN, so a level list cannot
+            // answer it and the "plate drawn but excluded" state cannot arise — with no mask artwork
+            // there is no capacitor in the layout at all. The excluded-plate case is still reported,
+            // by the extractor's own dropped-artwork warning, which is about the metal rather than
+            // about the film.
+            notes.Add(tiedToMask
+                ? $"'{film.Name}' is a patterned thin film defined by the '{plate}' mask, and this " +
+                  $"layout draws nothing on '{plate}' — so it enters the medium as AIR at its stated " +
+                  $"thickness{reverted}. The film exists only where the mask opens it, so a layout " +
+                  "that draws none is modelled exactly as it would be on a technology with no " +
+                  $"capacitor module at all. Draw the '{plate}' mask to put the film in the run."
+                : plateHasArtwork is not null && plateHasArtwork(plate)
                 ? EmFinding.Warn(
                     $"'{film.Name}' is a patterned thin film tied to '{plate}', '{plate}' CARRIES " +
                     "ARTWORK in this layout, and it is not in this run's analysis levels — so the " +

@@ -154,10 +154,12 @@ public sealed class ShippedTechnologiesTests
 
     /// <summary>
     /// <b>The ONE shipped MMIC technology carries the MIM module, and the module is TIED to its
-    /// plate.</b> MIM-2 shipped it as a second file because a capacitor dielectric between the
+    /// MASK.</b> MIM-2 shipped it as a second file because a capacitor dielectric between the
     /// interconnect metals refused every airbridge run and moved a Metal1 line; MIM-7 removed that
     /// premise — <see cref="StackupLayer.PresentWithLayer"/> makes the film enter an EM run's medium
-    /// only when its plate is one of that run's analysis levels — so there is one file again.
+    /// only when the layout says it is there — so there is one file again. MIM-11 then re-pointed
+    /// the tie from the plate conductor to the nitride MASK, which is the thing the process actually
+    /// streams out and the thing that defines where the film is; the plate was a proxy for it.
     ///
     /// <para>What is asserted here is the DATA half: the module's three stackup entries, its two
     /// drawing layers, the tie, and the arithmetic that keeps Metal2 exactly 3 µm above Metal1 (the
@@ -178,10 +180,13 @@ public sealed class ShippedTechnologiesTests
         Assert.Equal("Metal2",    via.SpanToLayer);
         Assert.Contains(tech.Layers, l => l.Name == "MIM Metal");
         Assert.Contains(tech.Layers, l => l.Name == "MIM Via");
+        // MIM-11 — the mask the tie names has to BE a drawing layer of this technology, or the tie
+        // resolves to nothing and the film is carried on the typo path in every run.
+        Assert.Contains(tech.Layers, l => l.Name == "Nitride");
 
         // MIM-7 — the tie itself, and the fact that it is the ONLY one. A second tied dielectric
         // would deactivate on its own schedule and is not something this technology means.
-        Assert.Equal("MIM Metal", thin.PresentWithLayer);
+        Assert.Equal("Nitride", thin.PresentWithLayer);
         Assert.All(tech.Stackup.Layers.Where(l => l.Name != "MIM Dielectric"),
                    l => Assert.Null(l.PresentWithLayer));
 

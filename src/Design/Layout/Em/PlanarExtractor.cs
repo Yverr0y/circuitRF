@@ -233,9 +233,27 @@ public static class PlanarExtractor
         var regionViaShapes = new List<(LayoutShape Shape, StackupLayer Entry)>();
         int ignoredViaPath = 0;
 
+        // ── MIM-11 — THE MASK THAT DEFINES A PATTERNED FILM IS ARTWORK, NOT CLUTTER ───────────
+        //
+        // A `PresentWithLayer` tie may name a DRAWING layer rather than a conductor entry, and on
+        // this process that is the true statement: the nitride is streamed out as its own mask and
+        // the plate is deposited on what it left. Such a layer is bound to no stackup entry, so
+        // before MIM-11 its shapes reached `ignoredOther` and were reported as "not metal as far as
+        // this technology is concerned" — which is correct about the metal and wrong about the run,
+        // because those shapes are exactly what decides whether the film is in the medium at all.
+        //
+        // Collected here rather than in a second walk so the layout is read ONCE, and recorded
+        // NON-EXCLUSIVELY (no `continue`): a mask layer that is also bound to a conductor or a via
+        // keeps every classification it had, and only the final catch-all below changes.
+        var maskLayers = PatternedDielectric.MaskLayers(tech);
+        var maskShapes = new List<(LayoutShape Shape, string Mask)>();
+
         foreach (var s in shapes)
         {
             if (s is LabelShape or BitmapShape) { ignoredAnnotation++; continue; }
+
+            bool onAMask = maskLayers.TryGetValue(s.Layer, out string? maskName);
+            if (onAMask) maskShapes.Add((s, maskName!));
 
             // L9d/D5 — a ViaShape on a layer bound to a StackupKind.Via entry is now ARTWORK, not
             // annotation. Before L9d it was skipped with everything else that is not a filled region
@@ -301,6 +319,10 @@ public static class PlanarExtractor
 
             if (viaBinding.TryGetValue(s.Layer, out var regionEntry))
             { regionViaShapes.Add((s, regionEntry)); continue; }
+
+            // MIM-11 — read, not ignored. It bound to no conductor and no via because a mask is
+            // neither; it still decided whether a layer of the medium is present.
+            if (onAMask) continue;
 
             ignoredOther++;
         }
@@ -489,8 +511,14 @@ public static class PlanarExtractor
         // actually draws on. A plate with no artwork is MIM-7's own case and stays a note; a plate
         // that is drawn and excluded is a capacitor missing from the answer.
         var drawnOn = signalBands.Select(b => b.Layer.Name).ToHashSet(StringComparer.Ordinal);
+        // MIM-11 — the second namespace, and the films that came out PRESENT. A mask tie asks a
+        // question about DRAWN ARTWORK rather than about this run's level list, which is why it is
+        // answered from `maskShapes` and not from `analysed`.
+        var maskDrawn = maskShapes.Select(m => m.Mask).ToHashSet(StringComparer.Ordinal);
+        var carriedFilms = new List<CarriedFilm>();
         var effectiveStackup = PatternedDielectric.Deactivate(
-            tech.Stackup, analysed.Contains, revertSheetSurface: true, notes, drawnOn.Contains);
+            tech.Stackup, analysed.Contains, revertSheetSurface: true, notes, drawnOn.Contains,
+            new PatternedFilmMask(tech.Layers, maskDrawn.Contains), carriedFilms);
         if (effectiveStackup is not null)
         {
             stack  = BuildStack(effectiveStackup);
@@ -1081,6 +1109,47 @@ public static class PlanarExtractor
             if (isStroke) viaStrokesOutlined++;
         }
 
+        // ── MIM-11 — the MASK's own polygons, through the same conversion, for one number ─────
+        //
+        // Not meshed, not stamped, in no matrix: a mask is not metal and nothing here pretends it
+        // is. It is converted only so the run can say how much of the layout the film it switched on
+        // actually covers — the one quantity that turns "modelled across the whole plane" from a
+        // property of the formulation into a size the reader can weigh. Same
+        // `RegionsToMesh` -> `Flatten` -> `ToPoints` chain as the conductors, for the reason MIM-1
+        // gives above: a second conversion could drift, and a coverage figure that disagreed with the
+        // artwork by a few per cent would be invisible.
+        //
+        // UNIONED FIRST. Two overlapping nitride rectangles are one opening in the mask, and summing
+        // their areas would report more film than exists — on a cell array, considerably more.
+        var maskPolysByName = new Dictionary<string, List<PlanarPolygon>>(StringComparer.Ordinal);
+        foreach (var group in maskShapes.GroupBy(m => m.Mask, StringComparer.Ordinal))
+        {
+            var operands = group.Select(m => m.Shape).ToList();
+            IReadOnlyList<LayoutShape> merged;
+            try   { merged = LayoutBooleans.Union(operands, tech).Shapes; }
+            catch (Exception) { merged = operands; }     // a degenerate operand is not worth a refusal
+
+            var polys = new List<PlanarPolygon>();
+            foreach (var shape in merged)
+            {
+                long mtol = LayoutFlattener.ResolveTolDbu(shape, tech);
+                foreach (var region in RegionsToMesh(shape, tech))
+                {
+                    IReadOnlyList<long[]> rings;
+                    try { rings = LayoutFlattener.Flatten(region, mtol); }
+                    catch (ArgumentOutOfRangeException) { continue; }
+                    if (rings.Count == 0 || rings[0].Length < 6) continue;
+
+                    var mOuter = ToPoints(rings[0], perDbu);
+                    var mHoles = new List<IReadOnlyList<EmPoint>>();
+                    for (int i = 1; i < rings.Count; i++)
+                        if (rings[i].Length >= 6) mHoles.Add(ToPoints(rings[i], perDbu));
+                    polys.Add(new PlanarPolygon(mOuter, mHoles.Count == 0 ? null : mHoles));
+                }
+            }
+            maskPolysByName[group.Key] = polys;
+        }
+
         // ── ANT-11 §2 — the ground pour, through the CONDUCTOR PATH'S OWN conversion ─────────
         //
         // Deliberately the same `RegionsToMesh` -> `LayoutFlattener.Flatten` -> `ToPoints` chain the
@@ -1341,9 +1410,151 @@ public static class PlanarExtractor
                           ? $"{vias.Count} via(s) carry z-directed current between them."
                           : "No via joins them, so the levels couple only through the medium."));
 
+        // ── MIM-11 — A CARRIED FILM IS LATERALLY INFINITE, AND NOTHING SAID SO ────────────────
+        //
+        // The medium string above is a correct list of bands — "0.103 mm εᵣ=12.9 | 0.0002 mm εᵣ=6.8
+        // | 0.0028 mm εᵣ=1" — and a reader who knows the stackup sees exactly what they expect and
+        // no approximation at all. But the 0.2 µm εᵣ = 6.8 band is present across the WHOLE PLANE,
+        // over every turn of a spiral and everywhere else, because the layered Green's function is
+        // built on laterally infinite strata. That is a property of the formulation and not a
+        // setting; MIM-11 explicitly does not try to fix it, and says its size instead.
+        //
+        // WHY WITH A COVERAGE FRACTION. "This is approximate" is not usable. "The film is modelled
+        // everywhere and the artwork that defines it covers 4 % of the layout" tells the reader both
+        // that the approximation is crude and that what it is crude ABOUT is small. MIM-11 measured
+        // the error on a Metal1 line at +0.108° of S₁₁ phase and −2.68 % of a gap capacitance, which
+        // is second order — the sentence says so rather than leaving the reader to fear the worst,
+        // because the thing that DOES make a capacitor read wrong is elsewhere.
+        //
+        // HEIGHTS ARE IN THE STACKUP'S OWN FRAME HERE. A surviving tie is one of RP-3's flip
+        // blockers, so a run that carries a film is never a flipped one and these z values may be
+        // read straight against the Stackup tab.
+        if (carriedFilms.Count > 0)
+        {
+            double extentM2 = ExtentArea(polysByLevel, regionViaPolys.Select(v => v.Poly),
+                                         groundOutlinePolys, maskPolysByName.Values);
+
+            foreach (var carried in carriedFilms)
+            {
+                // The artwork that DEFINES the film: the mask's own polygons where the tie names a
+                // mask, the plate level's where it names a conductor. Both are the honest answer to
+                // "how much of this layout has the film on it" in the namespace the tie was written
+                // in, and reporting one in place of the other would be a number about a different
+                // layer.
+                IEnumerable<PlanarPolygon> defining =
+                    carried.TieIsMask
+                        ? maskPolysByName.TryGetValue(carried.Tie, out var mp) ? mp : []
+                        : levels.FindIndex(b => string.Equals(b.Layer.Name, carried.Tie,
+                                                              StringComparison.Ordinal)) is var pi && pi >= 0
+                            ? polysByLevel[pi] : [];
+
+                // ── AND ONLY IF IT IS ACTUALLY IN THE MEDIUM ────────────────────────────────
+                //
+                // `BuildMediumStack` stops at the topmost analysis level and terminates in air
+                // there, so a film ABOVE that level is discarded from the solve — which is exactly
+                // ANT-12 §1a's case, and its warning already names the band. Saying "this run
+                // CARRIES the film" beside "that film is NOT in this solve" would be two findings
+                // contradicting each other about one band, and the cover warning is the one that
+                // matters. MIM-11 found this while measuring: two runs differing only in the film's
+                // εᵣ came back BIT-IDENTICAL on a Metal1-only run, and the engine was right.
+                //
+                // The SHEET note below is deliberately outside this guard. The sheet moved whether
+                // or not the film reached the medium — the substrate under this level really is
+                // 103 µm in such a run — so that sentence is if anything more useful there, where
+                // nothing else explains the height.
+                var filmBand = stack.FirstOrDefault(
+                    b => string.Equals(b.Layer.Name, carried.Film.Name, StringComparison.Ordinal));
+                bool inMedium = filmBand is not null && filmBand.BottomM < levels[^1].SheetM - 1e-15;
+
+                double coveredM2 = defining.Sum(NetArea);
+                string coverage = extentM2 > 0
+                    ? $"'{carried.Tie}' artwork covers " +
+                      FormatPercent(100.0 * Math.Min(coveredM2 / extentM2, 1.0)) +
+                      " of this layout's extent."
+                    : $"'{carried.Tie}' artwork is what defines it.";
+
+                // Deliberately NOT opening "'X' is a patterned thin film …", which is how the
+                // DEACTIVATION sentence opens. Two findings that say opposite things about the same
+                // band must not share an opening clause: a reader skimming, and every consumer
+                // matching on the phrase, would take one for the other.
+                if (inMedium) notes.Add(
+                    $"This run CARRIES the patterned thin film '{carried.Film.Name}' " +
+                    $"({carried.Film.ThicknessDbu / (double)StackupDbuPerMicron:G4} µm, " +
+                    $"εᵣ = {carried.Film.Epsr:G4}). The 2.5D medium has no way " +
+                    "to make a dielectric laterally finite, so it is modelled ACROSS THE WHOLE PLANE " +
+                    $"— including under metal that has none of it. {coverage} " +
+                    "On ordinary interconnect the error this introduces is of order a tenth of a " +
+                    "degree of phase and a few per cent of a fringing capacitance; it is second " +
+                    "order, and it is not the reason a capacitor would read wrong. To model the " +
+                    "interconnect without it, run the interconnect and the capacitor as separate " +
+                    "EM setups.");
+
+                if (carried.SheetRaisedConductor is { Length: > 0 } raised &&
+                    levels.FindIndex(b => string.Equals(b.Layer.Name, raised,
+                                                        StringComparison.Ordinal)) is var ri && ri >= 0)
+                    notes.Add(
+                        $"'{raised}'s analysis sheet is on the TOP of its band because a patterned " +
+                        $"film sits above it, so this run's '{raised}' is at z = " +
+                        $"{levelZ[ri] * 1e6:G4} µm rather than " +
+                        $"{(levelZ[ri] - (levels[ri].TopM - levels[ri].BottomM)) * 1e6:G4} µm. That is " +
+                        "what makes a plate gap read as the film alone rather than the film plus the " +
+                        "plate's own metal — and it means putting a capacitor anywhere in a layout " +
+                        "changes the modelled height of every conductor on that level. A run with no " +
+                        "film in it puts the sheet back on the bottom of the band, and is the run to " +
+                        "compare against.");
+            }
+        }
+
         return PlanarExtractionResult.Yes(problem, notes,
             new PlanarReturnPlane(groundBand?.Layer.Name, groundTopM, overridden, flipped));
     }
+
+    /// <summary>
+    /// MIM-11 — the bounding-box area, in m², of every piece of artwork this run read: the meshed
+    /// levels, the via footprints, the return plane's own pour and any patterned-film mask.
+    ///
+    /// <para><b>A bounding box and not a union</b>, because the question the coverage fraction
+    /// answers is "how much of the thing you are looking at has this film on it" — the extent of the
+    /// drawing, not the area of its copper. A union would put a sparse spiral's coverage near 100 %
+    /// and say nothing at all.</para>
+    /// </summary>
+    private static double ExtentArea(
+        IReadOnlyList<List<PlanarPolygon>> byLevel,
+        IEnumerable<PlanarPolygon> viaPolys,
+        IEnumerable<PlanarPolygon> groundPolys,
+        IEnumerable<List<PlanarPolygon>> maskPolys)
+    {
+        double minX = double.PositiveInfinity, minY = double.PositiveInfinity;
+        double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
+
+        void Grow(PlanarPolygon p)
+        {
+            foreach (var pt in p.Outer)
+            {
+                if (pt.X < minX) minX = pt.X;
+                if (pt.X > maxX) maxX = pt.X;
+                if (pt.Y < minY) minY = pt.Y;
+                if (pt.Y > maxY) maxY = pt.Y;
+            }
+        }
+
+        foreach (var level in byLevel) foreach (var p in level) Grow(p);
+        foreach (var p in viaPolys)    Grow(p);
+        foreach (var p in groundPolys) Grow(p);
+        foreach (var m in maskPolys) foreach (var p in m) Grow(p);
+
+        return maxX > minX && maxY > minY ? (maxX - minX) * (maxY - minY) : 0.0;
+    }
+
+    /// <summary>MIM-11 — a percentage a reader can act on. "0 %" for a film that covers a thousandth
+    /// of the layout is a rounding that argues the opposite of the truth, so anything below the
+    /// first decimal is reported as a bound rather than as zero.</summary>
+    private static string FormatPercent(double pct) => pct switch
+    {
+        <= 0  => "0 %",
+        < 0.1 => "under 0.1 %",
+        _     => $"{pct:0.#} %",
+    };
 
     /// <summary>
     /// <b>ANT-1 — the meshable REGIONS of one shape.</b> Everything except a <c>PathShape</c> is its

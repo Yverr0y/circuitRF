@@ -6339,3 +6339,125 @@ wrong before it got them right.** Recorded because the method is the lesson, not
 Also live and out of scope: a testbench sweeping 1-10 GHz against a 0.5-5 GHz `.s2p` with
 `ExtrapMode=NearestEdge` holds the top half of every curve flat at the 5 GHz value, and `check` on
 that netlist reports 0 errors, 0 warnings, 0 notes. EM-SEV named it; it is still silent.
+
+## MIM-11 — the nitride is a mask, and a film that is carried says what it costs (2026-09-16)
+
+Two things the brief deliberately kept apart, because one is achievable and one is not.
+
+**Achievable: the MASK was missing.** On this process the MIM insulator is streamed out as its own
+layer and becomes its own mask — the plate is deposited on whatever that mask left. `KIT_MIMCAP` drew
+no nitride at all, so a `.gds` written from the kit was not manufacturable and a DRC deck pointed at
+it had nothing to check. It draws one now, enclosing the top plate.
+
+**Not achievable, and not a deferral: the FILM cannot be laterally patterned.** The layered Green's
+function is built on laterally infinite strata. A drawn nitride polygon does not change that, and a
+drawing layer that looked like it did would be a worse lie than no drawing layer at all. `MIM-11`
+explicitly did not try; it measured the error instead and made the run state it.
+
+### `PresentWithLayer` resolves in two namespaces
+
+A CONDUCTOR stackup entry first — exactly as MIM-7 wrote it, and the precedence is load-bearing: it
+is what makes every technology authored against MIM-7 resolve the same name to the same rule and
+extract bit for bit as it did, whatever a drawing layer happens to be called. Otherwise a DRAWING
+LAYER, in which case "in this run" means *this run's layout carries artwork on that layer*. A name in
+neither namespace keeps MIM-7's typo path: the film stays ACTIVE and says so, because deactivating on
+a typo would silently thin the medium.
+
+The shipped `mmic-GaAs_2LM_100um` ties `MIM Dielectric` to `Nitride`. `MIM Metal` was always a
+proxy — it answered the same way on every layout anyone had drawn — and the proxy could not express a
+mask-only structure at all.
+
+**One consequence is deliberate and is a real behaviour change.** A layout that draws the mask
+carries the film whether or not the plate LEVEL is in the run, because excluding a level from an
+analysis does not etch a wafer. That costs one of the three warnings
+`LeavingThePlateLevelOut_…` used to assert; the capacitor's absence from such a run is still reported
+twice, by the extractor's own dropped-artwork and dropped-via warnings, and both name the level to
+put back. The test now states the trade rather than losing it.
+
+`CrossSectionExtractor` had to learn the second namespace too, and the reason is the failure mode
+rather than the feature: had it not, the re-pointed shipped tie would have resolved to nothing there,
+the film would have stayed active on the TYPO path, and every closed-form microstrip on the metal
+below it would have moved — silently, and on that one code path only.
+
+### What the infinite film actually costs, measured
+
+On a Metal1 line with a DETACHED Metal2 island placed well clear of it, so Metal2 is an analysis
+level, the medium reaches past the film rather than truncating at it, and no via crosses the film's
+interface. `Epsr` 6.8 against 1.0 is the only thing that moves:
+
+| quantity | change |
+|---|---|
+| max \|ΔS\| | 2.26e-3 |
+| phase of S₁₁ | **+0.108°** |
+| a Metal1 gap capacitance | **−2.68 %** |
+
+**Second order. It is worth fixing for correctness and for the mask, and it is worth SAYING, but it
+is not why a capacitor would read wrong.**
+
+**A trap found while measuring it.** The medium is built from the ground plane up to the TOPMOST
+analysis level and terminated in an air half-space there, so on a Metal1-only run the film above
+Metal1 is discarded entirely — two runs differing only in `Epsr` = 6.8 against 1.0 came back
+**bit-identical**, and the engine's own cover-layer warning said so correctly. Any measurement of a
+superstrate has to put a level above it first. The extractor's new carried-film note is guarded on
+exactly that test (`filmBand.BottomM < levels[^1].SheetM`), because "this run CARRIES the film"
+printed beside "that film is NOT in this solve" is two findings contradicting each other about one
+band.
+
+### A second effect the same size that nobody had named
+
+`MIM Metal` entering the run also makes `PatternedDielectric` stop reverting `Metal1`'s `SheetAt`, so
+Metal1's analysis sheet moves from the BOTTOM of its band to the TOP — **z = 100 µm becomes
+z = 103 µm**. Measured on the same line: Z_c 86.749 → 87.418 Ω (+0.77 %), gap capacitance +1.51 %.
+**Putting a capacitor anywhere in a layout therefore changes the modelled height of every Metal1
+conductor in it.** That is MIM-6 working exactly as designed and it is the right trade — it is the
+half that makes a plate gap read as the film alone — but it was invisible, and it is the same order
+as the film itself. It is a note of its own now, and it is deliberately NOT guarded on the film
+reaching the medium: the sheet moved either way, so on a run where the film was discarded that
+sentence is the only thing that explains the height.
+
+### The coverage fraction, and why a bounding box
+
+The carried-film note carries the fraction of the layout's extent the artwork that DEFINES the film
+covers — the mask's own polygons for a mask tie, the plate level's for a conductor tie, so the number
+is always about the layer the tie was written in. "This is approximate" is not usable; "the film is
+modelled everywhere and the artwork that defines it covers 4 % of the layout" says both that the
+approximation is crude and that what it is crude about is small.
+
+The denominator is a BOUNDING BOX of every piece of artwork the run read, not a union of copper. The
+question is *how much of the thing you are looking at has this film on it* — the extent of the
+drawing. A union would put a sparse spiral's coverage near 100 % and say nothing at all. The mask's
+own polygons ARE unioned first, because two overlapping nitride rectangles are one opening and
+summing them would report more film than exists.
+
+Real output on the 60 µm shipped capacitor: `'Nitride' artwork covers 62.5 % of this layout's
+extent` — plainly right on a layout that is almost entirely capacitor, and plainly small on a coil.
+
+### Two prose rules this created
+
+- **The carried note may not open the way the DEACTIVATION note opens.** Both say "patterned thin
+  film"; the deactivation says `'X' is a patterned thin film …` and the carried one says `This run
+  CARRIES the patterned thin film 'X' …`. Two findings that say opposite things about one band must
+  not share an opening clause — a reader skimming, and every gate matching on the phrase, would take
+  one for the other. Four existing assertions were narrowed to `"is a patterned thin film"` for this.
+- **A mask tie takes neither half of the EM-SEV split**, and that is not an omission. Both halves of
+  the conductor sentence end by naming an analysis level to add, which cannot answer a question about
+  whether a mask is DRAWN, and the "plate drawn but excluded" state cannot arise for a mask tie —
+  with no mask artwork there is no capacitor in the layout at all.
+
+**The enclosure the kit draws is `_min_feature_dbu`, the same number the plate enclosure takes**,
+because `tech` carries layers and a stackup and no DRC rules — a nitride-to-plate enclosure rule is
+not something a generator can be handed. That makes the mask come out exactly coterminous with the
+bottom plate, which is a real and ordinary way to draw one; a process stating two separate enclosures
+would draw two different rectangles there, and the kit says so rather than burying a second constant.
+
+**Deliberately dropped from the brief's proposed note text: the `§MIM-11` / `§MIM-12` / `§MIM-10`
+citations.** Run findings are surfaced VERBATIM to users (R-em-16) and no other one cites a brief id;
+a reader has nothing to open. The substance — that the error is second order, that it is not why a
+capacitor reads wrong, and that the way to model the interconnect without it is to run the two
+separately — is all in the sentence.
+
+Gates: `tests/Ui.Tests/Em/PatternedDielectricTests.cs` (two new tests — the drawing-layer namespace
+A/B'd on the mask alone with identical level lists, and the two new notes),
+`MimCapacitorTests`, `ShippedTechnologiesTests`, `SheetReferenceSurfaceTests` and
+`PdkPCellExampleTests` (the mask is drawn and encloses the plate). Every MIM fixture in the suite now
+draws nitride, because that is what a layout off `KIT_MIMCAP` contains.

@@ -32,6 +32,10 @@ public class PatternedDielectricTests
 
     private static readonly LayerKey Lower = new(1, 0);
     private static readonly LayerKey Plate = new(2, 0);
+    /// <summary>MIM-11's second namespace: a drawing layer bound to NO stackup entry, which is what
+    /// a mask is. Deliberately unbound — if it were bound to a conductor the tie would resolve in
+    /// the conductor namespace and the test would pass for the wrong reason.</summary>
+    private static readonly LayerKey Mask  = new(3, 0);
 
     private static long Um(double v) => (long)Math.Round(v * Dbu);
 
@@ -57,6 +61,7 @@ public class PatternedDielectricTests
         [
             new LayerDef { Key = Lower, Name = "Lower", ZOrder = 1, Purpose = "drawing" },
             new LayerDef { Key = Plate, Name = "Plate", ZOrder = 2, Purpose = "drawing" },
+            new LayerDef { Key = Mask,  Name = "Mask",  ZOrder = 3, Purpose = "drawing" },
         ],
         Stackup = new Stackup
         {
@@ -168,7 +173,7 @@ public class PatternedDielectricTests
         var gap = p.EffectiveStack.Layers.Single(l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
         Assert.Equal(1e-6, gap.ThicknessM, 12);
         Assert.Equal(0.004, gap.Material.TanD, 9);
-        Assert.DoesNotContain(r.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -183,7 +188,7 @@ public class PatternedDielectricTests
         var r = PlanarExtractor.Extract(LowerLineOnly(), ProbeTech(), Dbu, 20e9);
         Assert.True(r.Ok, r.Refusal);
 
-        var note = Assert.Single(r.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        var note = Assert.Single(r.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
         Assert.Contains("'Film'", note, StringComparison.Ordinal);
         Assert.Contains("'Plate'", note, StringComparison.Ordinal);
         Assert.Contains("as AIR", note, StringComparison.Ordinal);
@@ -191,14 +196,14 @@ public class PatternedDielectricTests
     }
 
     /// <summary>
-    /// <b>A tie naming a conductor the stackup does not have leaves the film ACTIVE.</b> The other
-    /// choice — deactivate whenever the name does not resolve — would make a typo silently thin the
-    /// medium, which is the failure the whole mechanism exists to prevent. It is a note, not a
-    /// refusal, because the extraction is still a valid one; <c>TechValidation</c> is where the typo
-    /// is called an error.
+    /// <b>A tie naming NEITHER a conductor entry nor a drawing layer leaves the film ACTIVE.</b> The
+    /// other choice — deactivate whenever the name does not resolve — would make a typo silently
+    /// thin the medium, which is the failure the whole mechanism exists to prevent. It is a note,
+    /// not a refusal, because the extraction is still a valid one; <c>TechValidation</c> is where
+    /// the typo is called an error.
     /// </summary>
     [Fact]
-    public void ATieNamingAnUnknownConductor_LeavesTheFilmInPlace_AndSaysSo()
+    public void ATieNamingNothingAtAll_LeavesTheFilmInPlace_AndSaysSo()
     {
         var tech = ProbeTech();
         tech.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "NoSuchPlate";
@@ -209,12 +214,14 @@ public class PatternedDielectricTests
         // level is at 103 µm (the TOP of the Lower band) exactly as the technology authored it,
         // where a working tie would have put it back at 100.
         Assert.Equal(103.0, r.Problem!.LevelZ(0) * 1e6, 12);
-        Assert.DoesNotContain(r.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
         Assert.Contains(r.Notes, n => n.Contains("NoSuchPlate", StringComparison.Ordinal) &&
-                                      n.Contains("no stackup entry", StringComparison.Ordinal));
+                                      n.Contains("neither a conductor stackup entry nor a drawing layer",
+                                                 StringComparison.Ordinal));
 
         Assert.Contains(TechValidation.Validate(tech),
-                        p => p.Contains("patterned with an unknown conductor", StringComparison.Ordinal));
+                        p => p.Contains("neither a conductor in this stackup nor one of this " +
+                                        "technology's drawing layers", StringComparison.Ordinal));
     }
 
     /// <summary>Naming the plate as an analysis level activates the film even with no plate artwork
@@ -228,14 +235,14 @@ public class PatternedDielectricTests
         Assert.True(r.Ok, r.Refusal);
         Assert.Single(r.Problem!.Layers);
         Assert.Equal(100.0, r.Problem!.LevelZ(0) * 1e6, 12);        // deactivated: sheet at the bottom
-        Assert.Contains(r.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.Contains(r.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
 
         var both = PlanarExtractor.Extract(LowerLineOnly(), ProbeTech(), Dbu, 20e9,
             new EmExtractionSettings(AnalysisLevelNames: ["Lower", "Plate"]));
         Assert.True(both.Ok, both.Refusal);
         Assert.Equal(103.0, both.Problem!.LevelZ(0) * 1e6, 12);     // active: sheet on the top
         Assert.Contains(both.Problem!.EffectiveStack.Layers, l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
-        Assert.DoesNotContain(both.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(both.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -264,7 +271,7 @@ public class PatternedDielectricTests
         // substrate's — the line is an ordinary microstrip.
         Assert.DoesNotContain(tied.Problem!.Regions, d => Math.Abs(d.Material.EpsR - 7.0) < 1e-9);
         Assert.Contains(stuck.Problem!.Regions,      d => Math.Abs(d.Material.EpsR - 7.0) < 1e-9);
-        Assert.Contains(tied.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.Contains(tied.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
 
         // …and a line drawn on the PLATE is a line under nothing: the film is beneath it either way,
         // so this is the case where the tie is active and the extraction is the same both ways.
@@ -276,7 +283,7 @@ public class PatternedDielectricTests
         var plateStuck = CrossSectionExtractor.Extract(onPlate, ProbeTech(tied: false), Dbu);
         Assert.True(plateTied.Ok, plateTied.Refusal);
         Assert.Equal(plateStuck.Problem!.Regions.Count, plateTied.Problem!.Regions.Count);
-        Assert.DoesNotContain(plateTied.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(plateTied.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -296,7 +303,8 @@ public class PatternedDielectricTests
         var unknown = ProbeTech();
         unknown.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Nope";
         Assert.Contains(TechValidation.Validate(unknown),
-                        p => p.Contains("patterned with an unknown conductor", StringComparison.Ordinal));
+                        p => p.Contains("neither a conductor in this stackup nor one of this " +
+                                        "technology's drawing layers", StringComparison.Ordinal));
 
         var toGround = ProbeTech();
         toGround.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Ground";
@@ -376,6 +384,122 @@ public class PatternedDielectricTests
 
         vm.UndoRedo.Redo();
         Assert.Equal("Plate", vm.Working.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // MIM-11 — the tie may name a MASK, and a carried film says what being laterally infinite costs
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>A tie naming a DRAWING LAYER is a tie to the mask that defines the film, and "in this run"
+    /// then means "this layout draws it".</b>
+    ///
+    /// <para>MIM-7's plate tie was a proxy: what physically decides where a thin film exists is the
+    /// mask the process streams out, and the plate is deposited on what that mask left. The proxy
+    /// answered the same way on every layout anyone had drawn, and it could not express a
+    /// nitride-only structure at all. Both halves are asserted here, because the whole value of the
+    /// change is that the two questions are now genuinely different: the mask alone switches the
+    /// film ON with no plate artwork anywhere, and no mask switches it OFF with the plate LEVEL
+    /// explicitly named.</para>
+    /// </summary>
+    [Fact]
+    public void ATieNamingADrawingLayer_AsksWhetherTheLayoutDrawsTheMask()
+    {
+        var tech = ProbeTech();
+        tech.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Mask";
+
+        // A/B ON THE MASK ALONE. Both runs name the SAME analysis levels, and "Lower", "Plate" is
+        // the list that switched the film on under MIM-7's plate tie. The only difference is a
+        // rectangle on an unbound drawing layer, and it is what decides.
+        //
+        // (Both name "Plate" for a reason that is not the tie at all: `BuildMediumStack` stops at
+        // the topmost analysis level, so a run with nothing above "Lower" discards the film from the
+        // medium whatever the tie says. That is ANT-12 §1a and it is reported by its own warning.)
+        var levels = new EmExtractionSettings(AnalysisLevelNames: ["Lower", "Plate"]);
+
+        var masked = LowerLineOnly();
+        masked.Add(Rect(Mask, 100, 10, 200, 50));
+        var on = PlanarExtractor.Extract(masked, tech, Dbu, 20e9, levels);
+        Assert.True(on.Ok, on.Refusal);
+        Assert.Contains(on.Problem!.EffectiveStack.Layers, l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
+        Assert.Equal(103.0, on.Problem!.LevelZ(0) * 1e6, 12);
+
+        var off = PlanarExtractor.Extract(LowerLineOnly(), tech, Dbu, 20e9, levels);
+        Assert.True(off.Ok, off.Refusal);
+        Assert.DoesNotContain(off.Problem!.EffectiveStack.Layers,
+                              l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
+        Assert.Equal(100.0, off.Problem!.LevelZ(0) * 1e6, 12);
+
+        // …and it SAYS so, in the mask's own words: "draw the mask", not "add a level", because a
+        // level list is not the control that answers this.
+        var note = Assert.Single(off.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
+        Assert.Contains("'Mask' mask", note, StringComparison.Ordinal);
+        Assert.Contains("Draw the 'Mask' mask", note, StringComparison.Ordinal);
+
+        // The typo path is unchanged and still leaves the film ACTIVE: a name in NEITHER namespace.
+        tech.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Masque";
+        var typo = PlanarExtractor.Extract(masked, tech, Dbu, 20e9, levels);
+        Assert.True(typo.Ok, typo.Refusal);
+        Assert.Contains(typo.Problem!.EffectiveStack.Layers, l => Math.Abs(l.Material.EpsR - 7.0) < 1e-9);
+        Assert.Contains(typo.Notes, n => n.Contains("Masque", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <b>MIM-11 item 3 — a run that CARRIES a patterned film says two things nothing said before:
+    /// that the film is modelled across the whole plane, with the fraction of the layout its own
+    /// artwork covers; and that the conductor beneath it is therefore modelled 3 µm higher than the
+    /// process states.</b>
+    ///
+    /// <para>The silence is the reason. The medium string is a correct list of bands, so a reader
+    /// who knows the stackup sees exactly what they expect and no approximation at all — while the
+    /// εᵣ 7 band is in fact present over every square micron of the layout, including metal with no
+    /// mask anywhere near it. The coverage fraction is what makes that weighable rather than
+    /// alarming, and MIM-11 measured the error itself as second order (0.108° of S₁₁ phase,
+    /// −2.68 % of a gap capacitance on a Metal1 line).</para>
+    ///
+    /// <para>The sheet move is the same size and had never been named at all: putting a capacitor
+    /// anywhere in a layout moves every conductor on the level beneath the film from the bottom of
+    /// its band to the top. That is MIM-6 working as designed and it is the right trade — it is the
+    /// half that makes a plate gap read as the film alone — but it is invisible in every other
+    /// report, and it is why a run with a capacitor in it is not comparable to one without.</para>
+    /// </summary>
+    [Fact]
+    public void ACarriedFilm_ReportsItsCoverageAndTheSheetItRaised()
+    {
+        // A 400 x 60 µm line with a 100 x 40 µm mask on it: 4,000 of 24,000 µm², which is 16.7 %.
+        var shapes = LowerLineOnly();
+        shapes.Add(Rect(Mask, 100, 10, 200, 50));
+        var tech = ProbeTech();
+        tech.Stackup.Layers.Single(l => l.Name == "Film").PresentWithLayer = "Mask";
+        var levels = new EmExtractionSettings(AnalysisLevelNames: ["Lower", "Plate"]);
+
+        var r = PlanarExtractor.Extract(shapes, tech, Dbu, 20e9, levels);
+        Assert.True(r.Ok, r.Refusal);
+
+        var carried = Assert.Single(r.Notes, n => n.Contains("CARRIES the patterned thin film",
+                                                             StringComparison.Ordinal));
+        Assert.Contains("'Film' (1 µm, εᵣ = 7)", carried, StringComparison.Ordinal);
+        Assert.Contains("ACROSS THE WHOLE PLANE", carried, StringComparison.Ordinal);
+        Assert.Contains("'Mask' artwork covers 16.7 % of this layout's extent", carried,
+                        StringComparison.Ordinal);
+
+        // A NOTE and never a warning: nothing here differs from what was drawn — the run is the run
+        // the technology describes, and the approximation is the formulation's, not a dropped shape.
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("CARRIES the patterned thin film",
+                                                          StringComparison.Ordinal));
+
+        var sheet = Assert.Single(r.Notes, n => n.Contains("analysis sheet is on the TOP",
+                                                           StringComparison.Ordinal));
+        Assert.Contains("'Lower' is at z = 103 µm rather than 100 µm", sheet, StringComparison.Ordinal);
+
+        // Neither sentence exists on the run that does not carry the film — they are about a
+        // decision this run made, not standing commentary on the technology.
+        var without = PlanarExtractor.Extract(LowerLineOnly(), tech, Dbu, 20e9, levels);
+        Assert.True(without.Ok, without.Refusal);
+        Assert.DoesNotContain(without.Notes, n => n.Contains("CARRIES the patterned thin film",
+                                                             StringComparison.Ordinal));
+        Assert.DoesNotContain(without.Notes, n => n.Contains("analysis sheet is on the TOP",
+                                                             StringComparison.Ordinal));
     }
 
     private static int CountOccurrences(string haystack, string needle)

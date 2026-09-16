@@ -45,6 +45,17 @@ public class MimCapacitorTests(ITestOutputHelper output)
     private static readonly LayerKey MimMetal    = new(9, 0);    // -> the "MIM Metal" conductor
     private static readonly LayerKey MimVia      = new(10, 0);   // -> "MIM Via"
 
+    // MIM-11 — the nitride MASK, which is what the shipped stackup's film is now tied to
+    // (PresentWithLayer: Nitride). Every fixture below that draws a plate draws one, because that is
+    // what a layout off `KIT_MIMCAP` contains and a fixture that skipped it would be testing a
+    // capacitor nobody can fabricate.
+    //
+    // DRAWN COINCIDENT WITH THE TOP PLATE here, where the kit draws it one minimum feature larger.
+    // Nothing reads the mask's EXTENT except the coverage percentage in the run's own note — it is
+    // never meshed and is in no matrix — so the fixtures keep their existing footprints rather than
+    // growing 4 µm on every side and colliding with the feeds they were sized against.
+    private static readonly LayerKey Nitride     = new(6, 0);
+
     private static long Um(double v) => (long)Math.Round(v * Dbu);
 
     /// <summary>|z|², without the square root <c>Complex.Magnitude</c> would take.</summary>
@@ -72,6 +83,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Rect(Metal1,      18, 18, 32, 32),      // bottom plate, 2 µm larger than the top all round
         Rect(BacksideVia, 20, 20, 30, 30),      // …grounded through the substrate
         Rect(MimMetal,    20, 20, 30, 30),      // top plate
+        Rect(Nitride,     20, 20, 30, 30),      // …and the mask that puts the film under it
         Rect(MimVia,      22, 22, 28, 28),      // its connection up to the routing metal
         Rect(Metal2,      22, 22, 70, 28),      // the feed
         Port(Metal2, 70, 25, "P1"),
@@ -85,6 +97,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
     [
         Rect(Metal1,   0, 20, 30, 30),          // feed in, continuous with the bottom plate
         Rect(MimMetal, 20, 20, 30, 30),         // top plate
+        Rect(Nitride,  20, 20, 30, 30),
         Rect(MimVia,   22, 22, 28, 28),
         Rect(Metal2,   22, 22, 60, 28),         // feed out
         Port(Metal1,  0, 25, "P1"),
@@ -102,8 +115,10 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Rect(Metal2,   0, 22, 28, 28),          // feed in
         Rect(MimVia,   22, 22, 28, 28),
         Rect(MimMetal, 20, 20, 30, 30),         // cap A top plate
+        Rect(Nitride,  20, 20, 30, 30),
         Rect(Metal1,   20, 20, 70, 30),         // both bottom plates and the line joining them
         Rect(MimMetal, 60, 20, 70, 30),         // cap B top plate
+        Rect(Nitride,  60, 20, 70, 30),
         Rect(MimVia,   62, 22, 68, 28),
         Rect(Metal2,   62, 22, 100, 28),        // feed out
         Port(Metal2,   0, 25, "P1"),
@@ -186,10 +201,14 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Assert.All(tech.Stackup.Layers.Where(l => l.Name != "Metal1"), l => Assert.Null(l.SheetAt));
 
         // MIM-7 — the ONE field that lets all of the above live on the technology every MMIC
-        // workspace copies. The film is patterned: it exists under its plate and nowhere else, so a
-        // run whose analysis levels do not include "MIM Metal" carries air in its place and puts
-        // Metal1's sheet back on the bottom of its band. Exactly one entry carries a tie.
-        Assert.Equal("MIM Metal", thin.PresentWithLayer);
+        // workspace copies. The film is patterned: it exists under its mask and nowhere else, so a
+        // run whose layout draws none carries air in its place and puts Metal1's sheet back on the
+        // bottom of its band. Exactly one entry carries a tie.
+        //
+        // MIM-11 — and it names the NITRIDE MASK, which is the thing that actually defines where the
+        // film is; "MIM Metal" was a proxy for it. The conductor spelling still resolves, so an
+        // older workspace's own copy of this stackup keeps working.
+        Assert.Equal("Nitride", thin.PresentWithLayer);
         Assert.All(tech.Stackup.Layers.Where(l => l.Name != "MIM Dielectric"),
                    l => Assert.Null(l.PresentWithLayer));
 
@@ -365,7 +384,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
         Assert.True(p.RequiresGeneralKernel);
         Assert.True(p.LevelIsOnSlabTop(0));
         Assert.True(new PlanarKernel().CanSolve(p).Ok);
-        Assert.DoesNotContain(r.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
     }
 
     /// <summary>The plate connection is a drawn REGION on a via entry (MIM-1), meshed at the outline
@@ -535,7 +554,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
     /// means here, it costs milliseconds, and a solve could not make it stronger.</para>
     /// </summary>
     [Fact]
-    public void LeavingThePlateLevelOut_WarnsThreeTimes_AndSeversTheCapacitor()
+    public void LeavingThePlateLevelOut_WarnsTwice_AndSeversTheCapacitor()
     {
         var r = PlanarExtractor.Extract(
             SeriesCapacitor(), StarterTechnologies.MmicGaAs(), Dbu, 20e9,
@@ -558,19 +577,22 @@ public class MimCapacitorTests(ITestOutputHelper output)
             w.Contains("via shape(s) span a conductor (MIM Metal)", StringComparison.Ordinal) &&
             w.Contains("NOT in this answer", StringComparison.Ordinal));
 
-        // 3 — and the film goes to air, which on THIS run is a warning rather than MIM-7's note,
-        //     because the plate it is tied to carries artwork.
-        Assert.Contains(r.Warnings, w =>
-            w.Contains("patterned thin film", StringComparison.Ordinal) &&
-            w.Contains("CARRIES ARTWORK", StringComparison.Ordinal));
+        // 3 — MIM-11 REMOVED THE THIRD WARNING, and the trade is worth stating rather than
+        //     quietly losing. While the film was tied to the PLATE CONDUCTOR, leaving that
+        //     conductor out of the levels also took the film out of the medium, and that produced a
+        //     third sentence about the capacitor. The tie now names the nitride MASK, which is the
+        //     true statement of where a thin film is — and this layout draws nitride, so the film is
+        //     in the medium whatever the level list says. That is correct: excluding a level from a
+        //     run does not etch the wafer. The capacitor is still reported as missing, twice, by the
+        //     two warnings above, and both name the level to put back.
+        Assert.DoesNotContain(r.Warnings, w => w.Contains("is a patterned thin film", StringComparison.Ordinal));
+        Assert.Contains(r.Notes, n =>
+            n.Contains("CARRIES the patterned thin film", StringComparison.Ordinal) &&
+            n.Contains("'Nitride' artwork covers", StringComparison.Ordinal));
 
-        // The structure, not the prose: nothing joins Metal1 to Metal2, and the 12.9 εᵣ film that
-        // would have is air.
+        // The structure, not the prose: nothing joins Metal1 to Metal2.
         Assert.Equal(["Metal1", "Metal2"], r.Problem!.Layers.Select(l => l.Name));
         Assert.Empty(r.Problem!.ViaList);
-        Assert.All(r.Problem!.EffectiveStack.Layers,
-                   l => Assert.True(l.Material.EpsR is 1.0 or 12.9,
-                                    $"the MIM film should be air or GaAs here, not εᵣ={l.Material.EpsR}"));
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -585,6 +607,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
     [
         Rect(Metal1,    0, 0, 20, 10),          // feed in, continuous with the bottom plate
         Rect(MimMetal, 10, 0, 20, 10),          // top plate, 10 x 10 µm
+        Rect(Nitride,  10, 0, 20, 10),
         Rect(MimVia,   10, 0, 20, 10),          // the plate connection, as large as the plate
         Rect(Metal2,   10, 0, 30, 10),          // feed out
         Port(Metal1,  0, 5, "P1"),
@@ -710,6 +733,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
     [
         Rect(Metal1,    0,  0, 64, 64),        // bottom plate, 2 µm of enclosure all round
         Rect(MimMetal,  2,  2, 62, 62),        // top plate — W x L, and the plate that sets C
+        Rect(Nitride,   2,  2, 62, 62),
         Rect(MimVia,   25, 25, 39, 39),        // the post up to Metal2
         Rect(Metal2,   25, 25, 39, 90),        // the strap that carries the top plate away
     ];
@@ -906,9 +930,11 @@ public class MimCapacitorTests(ITestOutputHelper output)
     /// shipped two MMIC technologies.</para>
     ///
     /// <para><b>The tie removes the premise rather than the refusal.</b> The kernel is untouched and
-    /// still refuses a via across an interface; there is simply no interface here, because
-    /// "MIM Metal" is not an analysis level of a run with no plate artwork in it, so the film enters
-    /// the medium as air and Metal1's sheet goes back to the bottom of its band. What that buys is
+    /// still refuses a via across an interface; there is simply no interface here, because this
+    /// layout draws no "Nitride" (MIM-11's mask, and before it no "MIM Metal" plate), so the film
+    /// enters the medium as air and Metal1's sheet goes back to the bottom of its band. Both
+    /// spellings of the tie answer this fixture the same way, which is what makes it the identity
+    /// gate for either. What that buys is
     /// asserted the strongest way available: not "it solves", but "every number the solver reads is
     /// the number the module-free stack produces".</para>
     /// </summary>
@@ -978,12 +1004,13 @@ public class MimCapacitorTests(ITestOutputHelper output)
         // The deactivation is REPORTED. A tie that switched off silently would be exactly the class
         // of failure the extractor's dropped-artwork note exists to prevent: a medium the user did
         // not author and cannot see.
-        var note = Assert.Single(shipped.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        var note = Assert.Single(shipped.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
         Assert.Contains("'MIM Dielectric'", note, StringComparison.Ordinal);
-        Assert.Contains("'MIM Metal'", note, StringComparison.Ordinal);
+        // MIM-11 — it names the MASK this layout draws none of, not the plate conductor.
+        Assert.Contains("'Nitride' mask", note, StringComparison.Ordinal);
         Assert.Contains("as AIR", note, StringComparison.Ordinal);
         Assert.Contains("'Metal1'", note, StringComparison.Ordinal);
-        Assert.DoesNotContain(plain.Notes, n => n.Contains("patterned thin film", StringComparison.Ordinal));
+        Assert.DoesNotContain(plain.Notes, n => n.Contains("is a patterned thin film", StringComparison.Ordinal));
 
         // EM-SEV R-emsev-3 — and on THIS run it stays a NOTE. The plate's absence is correct here:
         // no artwork was drawn on 'MIM Metal', so the film genuinely is not present and the run is
@@ -1126,6 +1153,7 @@ public class MimCapacitorTests(ITestOutputHelper output)
             Rect(Metal1,  100, 100, 164, 164),   // bottom plate
             Rect(Metal1,  164, 124, 264, 140),   // feed out
             Rect(MimMetal, 102, 102, 162, 162),  // top plate
+            Rect(Nitride,  102, 102, 162, 162),
             Port(Metal1,    0, 132, "P1"),
             Port(Metal1,  264, 132, "P2"),
         ]) view.Shapes.Add(shape);

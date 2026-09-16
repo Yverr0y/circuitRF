@@ -60,6 +60,9 @@ public class SheetReferenceSurfaceTests
     [
         Rect(new LayerKey(1, 0),   0, 20,  30, 30),
         Rect(new LayerKey(9, 0),  20, 20,  30, 30),
+        // MIM-11 — the nitride mask, which is what the shipped stackup's film is tied to. Without
+        // it this is a layout with no capacitor in it, and the film it is here to measure is air.
+        Rect(new LayerKey(6, 0),  20, 20,  30, 30),
         Rect(new LayerKey(10, 0), 22, 22,  28, 28),
         Rect(new LayerKey(2, 0),  22, 22,  60, 28),
         Port(new LayerKey(1, 0),   0, 25, "P1"),

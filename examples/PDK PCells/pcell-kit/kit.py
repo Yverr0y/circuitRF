@@ -43,14 +43,20 @@ from circuitrf_pcell import (
 COIL_METALS = ("Metal1", "Metal2")
 VIA_LAYER = "Via"
 
-#: The MIM capacitor's own three names. `MIM Metal` is the thin top plate, 0.25 um above Metal1;
-#: `MIM Via` is the post that carries it up to Metal2, which is the only metal it can reach. The
-#: DIELECTRIC is not in this list on purpose - it is a STACKUP layer declared `PresentWithLayer:
-#: MIM Metal`, so it exists exactly where the top plate is drawn and there is nothing to draw for
-#: it. A generator that drew one anyway would put a second dielectric under the first.
+#: The MIM capacitor's own four names. `MIM Metal` is the thin top plate, 0.25 um above Metal1;
+#: `MIM Via` is the post that carries it up to Metal2, which is the only metal it can reach.
+#:
+#: `Nitride` is the MASK, and it is drawn (MIM-11). On this process the capacitor insulator is
+#: streamed out as its own layer and becomes its own mask: the plate is deposited on whatever that
+#: mask left. So a `.gds` written from a kit that draws no nitride is not manufacturable, and a DRC
+#: deck pointed at it has nothing to check. `MIM Dielectric` is the other half of the same fact and
+#: is NOT drawn, because it is not a mask - it is the STACKUP band the solver reads, declared
+#: `PresentWithLayer: Nitride`. Drawing the mask is what puts that band in a run; drawing a second
+#: shape for the band itself would put a second insulator under the first.
 MIM_METAL = "MIM Metal"
 MIM_VIA_LAYER = "MIM Via"
 MIM_DIELECTRIC = "MIM Dielectric"
+NITRIDE_LAYER = "Nitride"
 
 #: How a capacitor sits in the circuit, which on this process is a question about ARTWORK and not
 #: only about wiring: a shunt part grounds one of its plates itself, through a hole drilled clean
@@ -81,7 +87,7 @@ MIN_FEATURE_M = MIN_FEATURE_UM * 1e-6
 #: thing it may state on its own account.
 FALLBACK_LAYERS = {"Metal1": Layer(1, 0), "Metal2": Layer(2, 0), "Via": Layer(3, 0),
                    "MIM Metal": Layer(9, 0), "MIM Via": Layer(10, 0),
-                   "Backside Via": Layer(8, 0)}
+                   "Backside Via": Layer(8, 0), "Nitride": Layer(6, 0)}
 FALLBACK_LAYER = FALLBACK_LAYERS["Metal1"]
 
 #: The permittivity of free space, in F/m, and this process's MIM dielectric as a fallback for a
@@ -648,10 +654,18 @@ def mimcap(params, tech):
     top plate that escapes on Metal2. `Connection` decides whether it is drawn in SERIES with a line
     or SHUNT to ground.
 
-    **Nothing here draws the dielectric.** It is a stackup layer declared present wherever `MIM
-    Metal` is drawn, so the top plate IS the statement that it is there; a drawn one would be a
-    second insulator under the first. Look at `tech/mmic-GaAs_2LM_100um.ctech` - `MIM Dielectric`
-    carries no drawing layer at all, and that is what `PresentWithLayer` means.
+    **The nitride is drawn, and the dielectric is not** (MIM-11). They are two statements of one
+    fact and only one of them is a mask. `Nitride` is the MASK: this process streams it out as its
+    own layer, the plate is deposited on whatever it left, and a `.gds` written without it is not
+    manufacturable and gives a DRC deck nothing to check. `MIM Dielectric` is the STACKUP band the
+    field solver reads - look at `tech/mmic-GaAs_2LM_100um.ctech` and it carries no drawing layer at
+    all, because `PresentWithLayer: Nitride` says the band is present in a run whose layout draws the
+    mask. So there is still exactly ONE insulator: drawing the mask is what puts it there, and a
+    second shape drawn for the band itself would stack a second insulator under the first.
+
+    Earlier revisions of this kit drew no nitride and said the top plate was the statement that the
+    dielectric was there. That was sound for the stackup as it was then written and wrong for
+    manufacturing, which is the half a generator cannot leave out.
 
     **A shunt capacitor is not a series one with a wire on it**, which is the whole reason this is a
     parameter on the cell rather than something to draw around it:
@@ -690,6 +704,16 @@ def mimcap(params, tech):
     bottom_x2      = l + 2 * enc
     bottom = Rect(plate, 0, -(half + enc), bottom_x2, half + enc)
     shapes = [Rect(top, top_x1, -half, top_x2, half)]
+
+    # The nitride mask, enclosing the top plate. The enclosure is a PROCESS number and this kit does
+    # not have one: `tech` carries layers and a stackup and no DRC rules, so a nitride-to-plate
+    # enclosure rule is not something a generator can be handed. It takes the same
+    # `_min_feature_dbu` route the plate enclosure above already takes, and states it here rather
+    # than burying a second constant - which makes the mask come out exactly coterminous with the
+    # bottom plate. That is a real and ordinary way to draw one, and it is honest about what the kit
+    # knows; a process stating two separate enclosures would draw two different rectangles here.
+    shapes.append(Rect(_layer_named(tech, NITRIDE_LAYER),
+                       top_x1 - enc, -(half + enc), top_x2 + enc, half + enc))
 
     # The escape, which is the spiral's crossover one storey higher: a via post off the top plate, a
     # span on the metal above, a second post, and a landing pad back on Metal1 so BOTH terminals of
@@ -756,6 +780,12 @@ def mimcap(params, tech):
             f"this technology has no layer named '{MIM_METAL}'; the top plate was drawn on this "
             "kit's own fallback layer for that name instead, and the capacitance below is this "
             "kit's own dielectric rather than this technology's")
+    if tech.layers and tech.layer_named(NITRIDE_LAYER) is None:
+        diagnostics.append(
+            f"this technology has no layer named '{NITRIDE_LAYER}', so the capacitor's mask was "
+            "drawn on this kit's own fallback layer for it; an export from this layout will not be "
+            "manufacturable, and if the stackup ties its dielectric to that mask the film will not "
+            "be in an EM run either")
     if tech.stackup and tech.stackup.named(MIM_DIELECTRIC) is None:
         diagnostics.append(
             f"this technology's stackup has no '{MIM_DIELECTRIC}' layer; the reported capacitance "

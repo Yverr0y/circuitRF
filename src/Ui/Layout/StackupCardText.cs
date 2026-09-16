@@ -50,11 +50,13 @@ public static class StackupCardText
     public const string PresentWith = "Patterned with:";
 
     public const string PresentWithTip =
-        "For a patterned thin film such as a capacitor dielectric: the conductor it is deposited " +
-        "under. Name the conductor directly ABOVE this entry. An EM run carries this dielectric " +
-        "only when that conductor is one of its analysis levels; otherwise it enters the medium as " +
-        "air at the same thickness and the run says so in its notes. Leave as (none) for an " +
-        "ordinary, laterally continuous dielectric.";
+        "For a patterned thin film such as a capacitor dielectric: what says where it is. Name the " +
+        "CONDUCTOR it is deposited under — the one directly ABOVE this entry — and an EM run " +
+        "carries the film only when that conductor is one of its analysis levels. Or name the " +
+        "DRAWING LAYER that masks it, and a run carries the film only when the layout draws on " +
+        "that layer, which is what a process streaming its own nitride mask actually says. Either " +
+        "way, a run that does not carry it puts air at the same thickness in its place and says so " +
+        "in its notes. Leave as (none) for an ordinary, laterally continuous dielectric.";
 
     // ── Via: is the hole metal at all (GI1 R-gi1-2) ───────────────────────────────────────────────
 

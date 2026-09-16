@@ -203,25 +203,36 @@ public static class StarterTechnologies
                     },
                     new StackupLayer
                     {
-                        // Named "MIM Dielectric" and deliberately NOT "Cap Dielectric". The starter
-                        // has always carried "Cap Dielectric" and "Nitride" DRAWING layers, unbound
-                        // and ignored — mask documentation a process deck carries — and they stay
-                        // exactly that. A stackup DIELECTRIC is a different kind of thing: never
-                        // drawn, no artwork, and laterally infinite within a run
+                        // Named "MIM Dielectric" and deliberately NOT "Cap Dielectric". A stackup
+                        // DIELECTRIC is a different kind of thing from a drawing layer: it is a band
+                        // of the sandwich, and it is laterally infinite within a run
                         // (docs/design/mom-engine.md §10.12). Two names is what stops the next
                         // reader asking which one the solver reads.
                         //
                         // MIM-7 — PresentWithLayer is the whole reason this module can live on the
                         // ONE shipped MMIC technology instead of a second file. The film is
-                        // patterned: it exists under the plate and nowhere else. A run whose
-                        // analysis levels do not include "MIM Metal" carries air here instead, and
-                        // puts Metal1's sheet back on the bottom of its band — so an airbridge post
-                        // between the interconnect metals still solves (it would otherwise cross a
-                        // dielectric interface, which the kernel refuses for the WHOLE RUN) and a
-                        // Metal1 line still resolves against 100 µm of GaAs.
+                        // patterned: it exists under the plate and nowhere else. A run that does not
+                        // carry it carries air here instead, and puts Metal1's sheet back on the
+                        // bottom of its band — so an airbridge post between the interconnect metals
+                        // still solves (it would otherwise cross a dielectric interface, which the
+                        // kernel refuses for the WHOLE RUN) and a Metal1 line still resolves against
+                        // 100 µm of GaAs.
+                        //
+                        // MIM-11 — and the tie names the NITRIDE MASK, not the plate. On this
+                        // process the nitride is streamed out as its own mask and the plate is
+                        // deposited on what it left, so the mask is the thing that actually says
+                        // where the film is; "MIM Metal" was a proxy for it that happened to answer
+                        // the same way on every layout anyone had drawn. Saying the true thing is
+                        // also what lets a nitride-only structure exist at all, and it decouples the
+                        // film from a run's LEVEL LIST — a design that draws a capacitor carries its
+                        // film whether or not this particular run meshes the plate. "Nitride" has
+                        // been a drawing layer of this starter since long before the MIM module, and
+                        // `KIT_MIMCAP` now draws on it; an older .cws whose own copy of this stackup
+                        // still says "MIM Metal" keeps working, because that spelling resolves in
+                        // the conductor namespace exactly as it always did.
                         Kind = StackupKind.Dielectric, Name = "MIM Dielectric",
                         ThicknessDbu = Um(0.2m), Epsr = 6.8, TanD = 0.001,
-                        PresentWithLayer = "MIM Metal",
+                        PresentWithLayer = "Nitride",
                     },
                     new StackupLayer
                     {
@@ -231,8 +242,11 @@ public static class StarterTechnologies
                         // MIM-6 — the sheet on the TOP of the band, so a capacitor run's plate gap
                         // is the MIM Dielectric alone rather than that dielectric plus Metal1's own
                         // 3 µm of metal (16x). It applies only where the film does: MIM-7's rule
-                        // reverts it for any run that is not analysing the plate, which is what
-                        // keeps an ordinary Metal1 microstrip on 100 µm of GaAs.
+                        // reverts it for any run that does not carry the film, which is what keeps
+                        // an ordinary Metal1 microstrip on 100 µm of GaAs. MIM-11 measured the other
+                        // side of that trade — with the film in the run, Metal1 is modelled at
+                        // z = 103 µm instead of 100, worth +0.77 % on a line's Zc — and made the run
+                        // say so rather than leave it to be inferred from the medium string.
                         SheetAt = ConductorSheetSurface.Top,
                     },
                     new StackupLayer

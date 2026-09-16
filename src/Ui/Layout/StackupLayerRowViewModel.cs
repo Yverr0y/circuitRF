@@ -378,15 +378,32 @@ public sealed partial class StackupLayerRowViewModel : ObservableObject
 
     // ── MIM-7 — the dielectric that is patterned with a plate rather than laterally continuous ──
     //
-    // A ComboBox of conductor names with an explicit "(none)", exactly like the via Spans row above,
-    // and for the same reason: the value IS another stackup entry's name, so a free-text box would
-    // let a tie be spelled wrong and only fail at extraction. "(none)" is the ordinary dielectric —
-    // laterally infinite, present in every run — and is what every entry authored before this field
-    // means.
-    public IReadOnlyList<string> PresentWithChoices =>
-        [SpanNone, .. _owner.Working.Stackup.Layers
-                          .Where(l => l.Kind == StackupKind.Conductor && !l.IsGroundReference)
-                          .Select(l => l.Name)];
+    // A ComboBox of names with an explicit "(none)", exactly like the via Spans row above, and for
+    // the same reason: the value IS another entry's name, so a free-text box would let a tie be
+    // spelled wrong and only fail at extraction. "(none)" is the ordinary dielectric — laterally
+    // infinite, present in every run — and is what every entry authored before this field means.
+    //
+    // MIM-11 — the list is BOTH namespaces the tie resolves in, conductors first because that is the
+    // order the resolver uses, then the drawing layers, which is where a MASK lives. A drawing layer
+    // whose name a conductor already carries is left out rather than listed twice: picking it would
+    // store a string that resolves to the conductor, so the second row would be a choice that does
+    // not do what it says.
+    public IReadOnlyList<string> PresentWithChoices
+    {
+        get
+        {
+            var conductors = _owner.Working.Stackup.Layers
+                .Where(l => l.Kind == StackupKind.Conductor && !l.IsGroundReference)
+                .Select(l => l.Name).ToList();
+            var taken = new HashSet<string>(
+                _owner.Working.Stackup.Layers.Where(l => l.Kind == StackupKind.Conductor)
+                                             .Select(l => l.Name), StringComparer.Ordinal);
+            return [SpanNone, .. conductors,
+                    .. _owner.Working.Layers.Select(l => l.Name)
+                             .Where(n => n is { Length: > 0 } && !taken.Contains(n))
+                             .Distinct(StringComparer.Ordinal)];
+        }
+    }
 
     private string _selectedPresentWith = SpanNone;
     public string SelectedPresentWith
