@@ -241,15 +241,60 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     [ObservableProperty] private string? _kernelRefusal;
     [ObservableProperty] private ObservableCollection<string> _notes = [];
 
+    /// <summary>
+    /// <b>EM-SEV R-emsev-1, one surface earlier than the Messages panel — the findings that say
+    /// the answer will not be what was drawn, kept OUT of the note list.</b>
+    ///
+    /// <para>The run already ranks: <c>EmRunService</c> splits the kernel's findings by class and
+    /// <c>WorkspaceViewModel</c> posts errors, then warnings, then notes. This panel did not. It
+    /// joined every sentence into one block, so the three that said a user's MIM capacitor was not
+    /// in the solve read as three paragraphs of eighteen, in the dialog that is open while the tick
+    /// box that fixes them is on screen. Reported 2026-09-16 after it cost two runs in two days.
+    /// </para>
+    ///
+    /// <para><b>A second block, not a per-note list.</b> The owner's 2026-09-09 instruction stands
+    /// — one selectable block per list, so a single drag copies the lot — and two blocks keep it
+    /// while separating the classes. The cross-section extractor's notes carry no class and its
+    /// list is always empty here, which is correct: it has nothing to rank.</para>
+    /// </summary>
+    [ObservableProperty] private ObservableCollection<string> _warnings = [];
+
+    /// <inheritdoc cref="Warnings"/>
+    [ObservableProperty] private ObservableCollection<string> _planarMeshWarnings = [];
+
     /// <summary>Gates the Notes label AND its list together, so a heading is never left standing over
     /// nothing — the failure a bare "Cross-section" heading over a null readback already produced
     /// once (owner report, 2026-08-11).</summary>
     public bool HasNotes => Notes.Count > 0;
 
+    /// <summary>Gates the warning block, which takes no height when there is nothing to rank.</summary>
+    public bool HasWarnings => Warnings.Count > 0;
+
+    /// <inheritdoc cref="HasWarnings"/>
+    public bool HasPlanarMeshWarnings => PlanarMeshWarnings.Count > 0;
+
+    /// <inheritdoc cref="NotesText"/>
+    public string WarningsText => string.Join("\n\n", Warnings);
+
+    /// <inheritdoc cref="NotesText"/>
+    public string PlanarMeshWarningsText => string.Join("\n\n", PlanarMeshWarnings);
+
     partial void OnNotesChanged(ObservableCollection<string> value)
     {
         OnPropertyChanged(nameof(HasNotes));
         OnPropertyChanged(nameof(NotesText));
+    }
+
+    partial void OnWarningsChanged(ObservableCollection<string> value)
+    {
+        OnPropertyChanged(nameof(HasWarnings));
+        OnPropertyChanged(nameof(WarningsText));
+    }
+
+    partial void OnPlanarMeshWarningsChanged(ObservableCollection<string> value)
+    {
+        OnPropertyChanged(nameof(HasPlanarMeshWarnings));
+        OnPropertyChanged(nameof(PlanarMeshWarningsText));
     }
 
     // ── ONE selectable block per notes list, not one per note ──────────────────────────────────
@@ -485,6 +530,25 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// sentence naming what is. Shown under the analysis-level list; see
     /// <see cref="UpdateExcludedArtworkNote"/>.</summary>
     [ObservableProperty] private string? _excludedArtworkNote;
+
+    /// <summary>
+    /// <b>Whether the Analysis-levels expander is open. Two-way, and this side opens it.</b>
+    ///
+    /// <para>R-emsev-6 put one sentence under the level list so the user would see it "while the
+    /// tick boxes that fix it are on screen". They were not on screen: the expander ships
+    /// collapsed, an Expander does not realise its content until it is opened, and the header —
+    /// <see cref="AnalysisLevelsSummary"/> — reads "Analysis levels — 2 of 3 included", which is
+    /// true and says nothing about which one is missing or what it costs. So the line that names
+    /// the excluded level rendered nowhere, and the whole requirement was satisfied in the source
+    /// and not in the window. User-reported 2026-09-16, twice in two days, both times a MIM
+    /// capacitor silently absent from the answer.</para>
+    ///
+    /// <para><b>It is only ever set TRUE from here.</b> Collapsing is the user's, and it stays
+    /// collapsed once they collapse it — re-opening on every refresh would fight a deliberate
+    /// gesture, and a panel that will not stay shut is worse than one that never opened. The note
+    /// itself does not go away, and neither does the warning the run posts.</para>
+    /// </summary>
+    [ObservableProperty] private bool _analysisLevelsExpanded;
 
     /// <summary>The ports the layout's own <c>IsPort</c> labels resolved to, for the panel's port
     /// list and for the R18 readback. Empty for a cross-section setup, whose two ports ARE the two
@@ -1585,6 +1649,12 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PortRefusal        = null;
         PlanarPorts        = [];
         Notes              = [];
+        // Cleared with Notes for the same reason and by the same rule: a refresh that returns early
+        // must not leave the PREVIOUS extraction's warnings standing over the current one. The
+        // planar list is cleared here too — PreparePlanarMesh fills it, and a refresh that never
+        // reaches the mesher would otherwise keep whatever the last geometry said.
+        Warnings           = [];
+        PlanarMeshWarnings = [];
         // EM-SEV R-emsev-6 — cleared with the rest, so a refresh that returns early (no layout, no
         // technology) cannot leave the previous layout's sentence under the tick boxes.
         ExcludedArtworkNote = null;
@@ -1711,7 +1781,10 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
     /// </summary>
     private void RefreshPlanar(EmLayoutSource source, PlanarExtractionResult planar, EmKernelChoice choice)
     {
-        Notes         = [.. planar.Notes];
+        // NoteTexts, not Notes: `Notes` is every finding's text with the class discarded, so
+        // taking it here would print each warning twice once Warnings is populated below.
+        Notes         = [.. EmFindings.NoteTexts(planar.Findings)];
+        Warnings      = [.. EmFindings.WarningTexts(planar.Findings)];
         PlanarPorts   = [];
         DispersionDisabledReason =
             "The Kirschning–Jansen correction belongs to the cross-section analysis, where it is " +
@@ -1764,9 +1837,10 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         // Properties Inspector do, and the drawing updates because that is where the value lives.
 
         var notes = new List<string>(_geometryNotes);
-        notes.AddRange(planar.Notes);
-        notes.AddRange(ports.Notes);
-        Notes = [.. notes];
+        notes.AddRange(EmFindings.NoteTexts(planar.Findings));
+        notes.AddRange(ports.Notes);           // port extraction carries no class
+        Notes    = [.. notes];
+        Warnings = [.. EmFindings.WarningTexts(planar.Findings)];
 
         RebuildPlanarPortRows(ports.Rows);
         RaiseState();
@@ -1989,7 +2063,8 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
             meshGeometry.Shapes, source.Technology, source.DbuPerMicron, fMax, Working.ToExtractionSettings(),
             meshGeometry.GeneratorIds);
 
-        PlanarMeshNotes = [.. meshGeometry.Notes, .. extraction.Notes];
+        PlanarMeshNotes    = [.. meshGeometry.Notes, .. EmFindings.NoteTexts(extraction.Findings)];
+        PlanarMeshWarnings = [.. EmFindings.WarningTexts(extraction.Findings)];
         if (!extraction.Ok)
         {
             PlanarExtractionRefusal = extraction.Refusal;
@@ -2001,7 +2076,7 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         PlanarProblem = extraction.Problem;
         // Held so AdoptPlanarMeshReport can prepend them to the mesher's own — the notes are built in
         // two places and must read in one order.
-        _pendingPlanarNotes = [.. meshGeometry.Notes, .. extraction.Notes];
+        _pendingPlanarNotes = [.. meshGeometry.Notes, .. EmFindings.NoteTexts(extraction.Findings)];
         // ── The mesh PREVIEW is of the problem that will be SOLVED, vias included ───────────────
         //
         // An internal port with no via drawn under it grows its own path to the plane before meshing
@@ -2492,6 +2567,9 @@ public sealed partial class EmSetupEditorViewModel : ObservableObject
         ExcludedArtworkNote =
             string.Join("; ", parts) +
             " — that metal is not meshed and contributes nothing to the answer.";
+
+        // The note is inside the expander, so producing it is not the same as showing it.
+        AnalysisLevelsExpanded = true;
     }
 
     private void OnAnalysisLevelToggled(EmAnalysisLevelRow row)

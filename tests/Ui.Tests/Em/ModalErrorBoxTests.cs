@@ -110,8 +110,13 @@ public sealed class ModalErrorBoxTests(ITestOutputHelper output) : IDisposable
 
         // R-pcal7-4 — what it DOES declare is a fact this run has always reported and the file has
         // never carried: this single point comes back with sigma_max just over 1, so it is not a
-        // network, and the run says so in its notes. A `.sNp` carries no notes.
-        bool notPassive = r.Notes.Any(n => n.Contains("NOT PASSIVE", StringComparison.Ordinal));
+        // network, and the run says so. A `.sNp` carries no findings.
+        //
+        // Read off WARNINGS rather than notes since 2026-09-16 (EM-SEV R-emsev-1): a sentence whose
+        // own words are "the s-parameters at those points should not be used" is the warning class
+        // by definition, and it had been arriving as Info.
+        bool notPassive = r.Warnings.Any(n => n.Contains("NOT PASSIVE", StringComparison.Ordinal));
+        Assert.DoesNotContain(r.Notes ?? [], n => n.Contains("NOT PASSIVE", StringComparison.Ordinal));
         Assert.Equal(notPassive, caveats.Any(c => c.Contains("NOT A PASSIVE NETWORK", StringComparison.Ordinal)));
     }
 

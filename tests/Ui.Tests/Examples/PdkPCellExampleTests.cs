@@ -1457,7 +1457,26 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
     /// Metal2 through two via posts, so a run whose analysis levels are Metal1 alone drops the
     /// underpass and the two ports are not connected at all. It publishes |S21| = 4e-4 — a clean,
     /// smooth, perfectly passive OPEN CIRCUIT — with one note among thirty saying two via shapes
-    /// were ignored. Measured, on this very file, before the level list was added.</para>
+    /// were ignored. Measured, on this very file.</para>
+    ///
+    /// <para><b>THE SETUP MUST NAME NO LEVELS AT ALL, and that is the whole point of this test.</b>
+    /// The first fix for the open circuit above was to PIN the list — <c>SignalStackupLayerName</c>
+    /// plus <c>AnalysisLevelNames: ["Metal1", "Metal2"]</c> — which is correct for the artwork as
+    /// shipped and wrong the moment anybody adds to it. A user copied this example, dropped a
+    /// <c>KIT_MIMCAP</c> into the layout to make an L+C resonator, and ran it: the capacitor's top
+    /// plate is on <c>MIM Metal</c>, which the pinned list does not name, so the plate, the
+    /// <c>MIM Via</c> that reaches it and the patterned film between the plates were all dropped and
+    /// the published answer was a flat 5.9 fF open across the band — the SAME failure this pin was
+    /// added to fix, one level up. Reported 2026-09-16, and it had caught them twice in two days.
+    /// </para>
+    ///
+    /// <para>With neither key present, <c>PlanarExtractor</c>'s own default governs — every signal
+    /// conductor that carries artwork — which yields these two levels here and picks up a third by
+    /// itself when a capacitor is added. <b>Both keys have to go:</b> removing
+    /// <c>AnalysisLevelNames</c> alone falls through to <c>SignalStackupLayerName</c>
+    /// (<c>PlanarExtractor</c>'s middle arm), which names ONE conductor and reinstates the original
+    /// open circuit. That is also why the assertion below is on the EXTRACTION rather than on the
+    /// file: what matters is the level set a run gets, not which keys are absent.</para>
     ///
     /// <para>The port labels are on the TOP cell rather than inside the generated one because
     /// <c>EmPortExtraction</c> reads the view's own shapes and not the flattened ones. A label
@@ -1472,17 +1491,35 @@ public sealed class PdkPCellExampleTests(ITestOutputHelper output) : IDisposable
 
         var setup = EmSetupPersistence.LoadFromFile(cem);
         Assert.Equal("SpiralInductor/layout/SpiralInductor.clay", setup.LayoutRef);
-        Assert.Equal("Metal1", setup.SignalStackupLayerName);
-        Assert.Equal(["Metal1", "Metal2"], setup.AnalysisLevelNames);
 
-        // The via posts the level list exists for.
+        // Neither key, so nothing pins the level set and the extractor's own default governs.
+        // Empty or absent — PlanarExtractor tests both keys with `is { Length: > 0 }`, so that is
+        // the condition the gate has to state rather than `null` specifically.
+        Assert.True(string.IsNullOrEmpty(setup.SignalStackupLayerName),
+                    $"the setup still pins a signal conductor: '{setup.SignalStackupLayerName}'");
+        Assert.Empty(setup.AnalysisLevelNames);
+
+        // The via posts the two levels exist for.
         string clay = Path.Combine(ExampleRoot(), "SpiralInductor", "layout", "SpiralInductor.clay");
-        var instance = Assert.Single(LayoutPersistence.LoadFromFile(clay).Instances);
+        var view     = LayoutPersistence.LoadFromFile(clay);
+        var instance = Assert.Single(view.Instances);
         string cellDir = RefPath.Resolve(Path.GetDirectoryName(clay)!, instance.CellRef);
         var cell = LayoutPersistence.LoadFromFile(
             Path.Combine(cellDir, "layout", Path.GetFileName(cellDir) + ".clay"));
         Assert.Contains(cell.Shapes, sh => sh.Layer == Via);
         Assert.Contains(cell.Shapes, sh => sh.Layer == Metal2);
+
+        // ── The gate: what the run actually meshes, derived rather than declared ───────────────
+        var geometry = EmGeometry.Flatten(view, clay);
+        var r = PlanarExtractor.Extract(
+            geometry.Shapes, Tech(), view.DbuPerMicron, 8e9, setup.ToExtractionSettings());
+        Assert.True(r.Ok, r.Refusal);
+        Assert.Equal(["Metal1", "Metal2"], r.Problem!.Layers.Select(l => l.Name));
+
+        // And nothing was dropped on the way — the underpass is IN, which is the thing the flat
+        // open circuit was the absence of.
+        Assert.Empty(r.Warnings);
+        Assert.NotEmpty(r.Problem!.ViaList);
     }
 
     /// <summary>

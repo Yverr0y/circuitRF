@@ -485,6 +485,23 @@
                              be left standing over nothing — the exact failure the ungated
                              "Cross-section" heading produced. -->
                         <StackPanel IsVisible="{Binding ViewModel.HasNotes}" Margin="0,6,0,0" Spacing="2">
+                            <!-- EM-SEV R-emsev-1 — the findings that change WHAT WAS SOLVED, above
+                                 the ones that merely explain it, in the warning brush. The run has
+                                 ranked these since EM-SEV; this panel joined them into the note
+                                 block, so a level carrying a user's capacitor read as one paragraph
+                                 of eighteen in the very dialog holding the tick box that fixes it.
+                                 Still ONE block per class, per the 2026-09-09 copy instruction. -->
+                            <!-- Selectable, like every other warning-coloured string here —
+                                 EmSetupLayoutRowTests.EveryWarningColouredString_IsSelectable is
+                                 mechanical about it, and a heading nobody can drag through breaks
+                                 a selection that starts above it and ends below. -->
+                            <SelectableTextBlock Classes="colhdr" FontWeight="SemiBold" Text="Warnings"
+                                       Foreground="{DynamicResource CrfWarningBrush}"
+                                       IsVisible="{Binding ViewModel.HasWarnings}"/>
+                            <SelectableTextBlock Text="{Binding ViewModel.WarningsText}"
+                                                 Foreground="{DynamicResource CrfWarningBrush}"
+                                                 IsVisible="{Binding ViewModel.HasWarnings}"
+                                                 TextWrapping="Wrap" FontSize="10"/>
                             <TextBlock Classes="colhdr" FontWeight="SemiBold" Text="Notes"/>
                             <!-- ONE block, not an ItemsControl of them — an ItemsControl selects one
                                  LINE at a time and copying a report out means dragging each note
@@ -539,7 +556,11 @@
                      lists) because the rows are CHECKBOXES: a ListBox would add a selection highlight
                      that means nothing here. The MaxHeight ScrollViewer is what bounds it instead —
                      and only CONDUCTORS appear, which is a far smaller set than a layer table. -->
-                <Expander Margin="0,8,0,0" IsExpanded="False"
+                <!-- IsExpanded is BOUND, not False: the view model opens this when something drawn
+                     is being left out of the run, because R-emsev-6's sentence lives inside here and
+                     a collapsed Expander renders none of its content. See AnalysisLevelsExpanded. -->
+                <Expander Margin="0,8,0,0"
+                          IsExpanded="{Binding ViewModel.AnalysisLevelsExpanded, Mode=TwoWay}"
                           IsVisible="{Binding ViewModel.IsPlanarAnalysis}"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                     <Expander.Header>
@@ -547,7 +568,7 @@
                     </Expander.Header>
                     <StackPanel Spacing="2">
                         <TextBlock FontSize="10" Opacity="0.75" TextWrapping="Wrap"
-                                   Text="Which conductor levels the full-wave solve meshes, bottom-to-top. Leave all unchecked to include every level that carries artwork — except one lying below everything the ports feed, which is left out so that stray artwork cannot move the return plane. Tick it to put it back."/>
+                                   Text="Which conductor levels the full-wave solve meshes, bottom-to-top. Anything not meshed is not in the answer. Leave all unchecked and the run takes every level that carries artwork — except one lying below everything the ports feed, which is left out so stray artwork cannot move the return plane (tick it to put it back), and except when Signal conductor above names one, which pins the run to that level alone."/>
                         <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding ViewModel.AnalysisLevelRows}">
@@ -952,6 +973,11 @@
                 <SelectableTextBlock FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
                            Text="{Binding ViewModel.PlanarMeshSummary}"
                            IsVisible="{Binding ViewModel.PlanarMeshReport, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                <!-- Warnings first, and in the warning brush — see the Notes block above. -->
+                <SelectableTextBlock Text="{Binding ViewModel.PlanarMeshWarningsText}" Margin="0,4,0,0"
+                                     Foreground="{DynamicResource CrfWarningBrush}"
+                                     IsVisible="{Binding ViewModel.HasPlanarMeshWarnings}"
+                                     TextWrapping="Wrap" FontSize="10"/>
                 <SelectableTextBlock Text="{Binding ViewModel.PlanarMeshNotesText}" Margin="0,4,0,0"
                                      IsVisible="{Binding ViewModel.HasPlanarMeshNotes}"
                                      TextWrapping="Wrap" FontSize="10" Opacity="0.8"/>

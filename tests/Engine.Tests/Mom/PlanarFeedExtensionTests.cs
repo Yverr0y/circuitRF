@@ -512,5 +512,17 @@ public class PlanarFeedExtensionTests(ITestOutputHelper output)
         string note = Assert.Single(before.Notes, n => n.StartsWith("NOT PASSIVE"));
         _out.WriteLine(note);
         Assert.DoesNotContain(after.Notes, n => n.StartsWith("NOT PASSIVE"));
+
+        // ── EM-SEV R-emsev-1 — AND IT IS A WARNING ────────────────────────────────────────────
+        //
+        // The assertions above read `Notes`, which is `EmFindings.Texts` — every finding's text
+        // with its class discarded — so they hold whichever class this carries and cannot state
+        // the one thing a reader needs, which is where it lands in the Messages panel. It shipped
+        // as `EmSeverity.Note`: `notes` is a `List<EmFinding>` and a bare string converts
+        // implicitly, so the sentence that says "the s-parameters at those points should not be
+        // used" arrived as Info, ranked level with the core count. User-reported 2026-09-16 on a
+        // sweep that was non-passive at 16 of 26 points.
+        var finding = Assert.Single(before.Findings, f => f.Text.StartsWith("NOT PASSIVE"));
+        Assert.Equal(EmSeverity.Warning, finding.Severity);
     }
 }

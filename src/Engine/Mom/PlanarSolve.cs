@@ -4003,7 +4003,14 @@ public static class PlanarSolve
         if (st.Deembed)
         {
             nonPassive = PassivityExcesses(points, z0);
-            if (PassivityNote(nonPassive, points.Count) is { } passivity) notes.Add(passivity);
+            // EM-SEV R-emsev-1 — a WARNING, not a note. This sentence says outright that the
+            // s-parameters at those points should not be used, which is the definition of "an
+            // answer was produced and something in it is not what was drawn". It reached the
+            // Messages panel as Info, ranked level with the core count, because `notes` is a
+            // List<EmFinding> and a bare string converts to EmFinding.Note. User-reported
+            // 2026-09-16: a run that was 75% non-passive read as thirty ordinary lines.
+            if (PassivityNote(nonPassive, points.Count) is { } passivity)
+                notes.Add(EmFinding.Warn(passivity));
         }
 
         // ── PCAL3 — THE INSTRUMENT'S OWN RESONANCE, NAMED RATHER THAN PUBLISHED SILENTLY ────────

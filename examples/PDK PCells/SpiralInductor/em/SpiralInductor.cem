@@ -2,11 +2,6 @@
   "FormatVersion": 1,
   "Name": "SpiralInductor",
   "LayoutRef": "SpiralInductor/layout/SpiralInductor.clay",
-  "SignalStackupLayerName": "Metal1",
-  "AnalysisLevelNames": [
-    "Metal1",
-    "Metal2"
-  ],
   "Frequency": {
     "StartExpr": "0",
     "StopExpr": "8",

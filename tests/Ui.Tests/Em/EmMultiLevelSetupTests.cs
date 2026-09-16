@@ -75,4 +75,130 @@ public sealed class EmMultiLevelSetupTests
         vm.RedoCommand.Execute(null);
         Assert.Contains(row.Name, vm.Working.AnalysisLevelNames);
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // EM-SEV R-emsev-6 — the note has to be ON SCREEN, which is not the same as being produced
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // R-emsev-6 asked for one line under the level list "while the tick boxes that fix it are on
+    // screen", and the line was built. It rendered nowhere: the Expander it lives in ships
+    // collapsed and an Expander does not realise its content until it opens, so all the user saw
+    // was the header — "Analysis levels — 1 of 3 included" — which is true and names nothing. Two
+    // users' worth of silently-absent MIM capacitors later (2026-09-16), the view model opens it.
+    //
+    // Asserting the NOTE alone is what let this ship: it was correct the whole time.
+
+    [Fact]
+    public void ArtworkOnAnUntickedLevel_ProducesTheNote_AndOPENS_TheExpander()
+    {
+        var tech = StarterTechnologies.MmicGaAs();
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        view.Shapes.Add(Rect(new LayerKey(1, 0), 0, 0, 40, 10));     // Metal1  — ticked
+        view.Shapes.Add(Rect(new LayerKey(9, 0), 5, 2, 35, 8));      // MIM Metal — NOT ticked
+
+        var vm = Editor(tech, view, ["Metal1"]);
+        vm.Refresh();
+
+        Assert.NotNull(vm.ExcludedArtworkNote);
+        Assert.Contains("MIM Metal", vm.ExcludedArtworkNote!, StringComparison.Ordinal);
+
+        // The half that was missing. Without this the sentence above is written to a control the
+        // window never builds.
+        Assert.True(vm.AnalysisLevelsExpanded,
+                    "the level list stayed collapsed, so the note naming 'MIM Metal' is not on screen");
+    }
+
+    [Fact]
+    public void WithNothingLeftOut_ThereIsNoNote_AndTheExpanderStaysShut()
+    {
+        var tech = StarterTechnologies.MmicGaAs();
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        view.Shapes.Add(Rect(new LayerKey(1, 0), 0, 0, 40, 10));
+        view.Shapes.Add(Rect(new LayerKey(9, 0), 5, 2, 35, 8));
+
+        var vm = Editor(tech, view, ["Metal1", "MIM Metal"]);
+        vm.Refresh();
+
+        Assert.Null(vm.ExcludedArtworkNote);
+        Assert.False(vm.AnalysisLevelsExpanded);   // it must not open on every setup
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    // EM-SEV R-emsev-1 in the PANEL — the run ranked these; the dialog did not
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // `EmRunService` splits the kernel's findings by class and `WorkspaceViewModel` posts errors,
+    // then warnings, then notes. This panel joined every sentence into one block with
+    // `extraction.Notes`, which is `EmFindings.Texts` — every finding's text, class discarded. So
+    // the three warnings that said a MIM capacitor was not in the solve read as three paragraphs
+    // among eighteen, in the dialog that is open while the tick box fixing them is on screen.
+    //
+    // The gate is BOTH halves: the warning is in the warning list, and it is NOT also in the note
+    // list — taking `Notes` for one and `Findings` for the other prints every warning twice.
+
+    [Fact]
+    public void ExtractionWarnings_AreSeparatedFromTheNotes_NotJoinedIntoThem()
+    {
+        var tech = StarterTechnologies.MmicGaAs();
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        view.Shapes.Add(Rect(new LayerKey(1, 0), 0, 0, 40, 10));     // Metal1  — ticked
+        view.Shapes.Add(Rect(new LayerKey(9, 0), 5, 2, 35, 8));      // MIM Metal — NOT ticked
+
+        var vm = Editor(tech, view, ["Metal1"]);
+        vm.Refresh();
+
+        string warned = Assert.Single(
+            vm.Warnings, w => w.Contains("carry artwork but are NOT in this", StringComparison.Ordinal));
+        Assert.Contains("MIM Metal", warned, StringComparison.Ordinal);
+
+        Assert.DoesNotContain(vm.Notes, n => n.Contains("carry artwork but are NOT in this",
+                                                       StringComparison.Ordinal));
+        Assert.True(vm.HasWarnings);
+        Assert.Contains("MIM Metal", vm.WarningsText, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A structure with nothing left out ranks nothing, and the block takes no height.
+    ///
+    /// <para><b>All three conductors are drawn and ticked on purpose.</b> With Metal2 left out, the
+    /// topmost analysis level is MIM Metal and the Air above it is discarded from the medium — a
+    /// real and correctly-classed warning about a different thing, which would make this test pass
+    /// or fail on something it is not about.</para>
+    /// </summary>
+    [Fact]
+    public void WithNothingLeftOut_TheWarningBlockIsEmpty()
+    {
+        var tech = StarterTechnologies.MmicGaAs();
+        var view = new LayoutView { DbuPerMicron = Dbu };
+        view.Shapes.Add(Rect(new LayerKey(1, 0), 0,  0, 40, 10));
+        view.Shapes.Add(Rect(new LayerKey(9, 0), 5,  2, 35,  8));
+        view.Shapes.Add(Rect(new LayerKey(2, 0), 10, 3, 30,  7));
+
+        var vm = Editor(tech, view, ["Metal1", "MIM Metal", "Metal2"]);
+        vm.Refresh();
+
+        Assert.False(vm.HasWarnings, "warnings: " + string.Join(" || ", vm.Warnings));
+        Assert.Empty(vm.Warnings);
+        Assert.NotEmpty(vm.Notes);      // the run still explains itself
+    }
+
+    private static EmSetupEditorViewModel Editor(
+        Technology tech, LayoutView view, string[] levels) =>
+        new(Path.Combine(Path.GetTempPath(), "unused-emsev6.cem"),
+            new EmSetup
+            {
+                Name = "x", LayoutRef = "a.clay", AnalysisKind = EmAnalysisKind.Planar,
+                AnalysisLevelNames = [.. levels],
+            })
+        {
+            ResolveLayout = _ => new EmLayoutSource("a.clay", view, tech, Dbu),
+        };
+
+    private static RectShape Rect(LayerKey layer, double x0, double y0, double x1, double y1) =>
+        new()
+        {
+            Layer = layer,
+            X1 = (long)(x0 * Dbu), Y1 = (long)(y0 * Dbu),
+            X2 = (long)(x1 * Dbu), Y2 = (long)(y1 * Dbu),
+        };
 }
