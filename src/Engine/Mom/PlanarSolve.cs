@@ -5071,7 +5071,9 @@ public static class PlanarSolve
                 $"13% of ε₀εᵣA/d at cell/separation 20 and 40, and passive) and well inside the " +
                 $"{PlanarLevels.ValidatedCellOverSeparation} MIM-8 measured the cross-level fill " +
                 $"over (≤ 1.7e-4 against forced-high quadrature; the extracted ELECTROSTATIC plate " +
-                $"capacitance within 1% of ε₀εᵣA/d).");
+                $"capacitance within 1% of ε₀εᵣA/d AT 10 GHz — MIM-12 measured the same instrument " +
+                $"at 1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz, so that 1% is not a claim about the " +
+                $"bottom of a MMIC band).");
             return notes;
         }
 
@@ -5081,7 +5083,8 @@ public static class PlanarSolve
                 $"CELL/SEPARATION = {worstRatio:G3} at {where}. The cross-level FILL is measured " +
                 $"over this range (≤ 1.7e-4 against forced-high quadrature, out to " +
                 $"{PlanarLevels.ValidatedCellOverSeparation}) and so is the ELECTROSTATIC plate " +
-                $"capacitance (within 1% of ε₀εᵣA/d). NEITHER OF THOSE IS A DE-EMBEDDED " +
+                $"capacitance (within 1% of ε₀εᵣA/d — but AT 10 GHz only; MIM-12 measured the same " +
+                $"instrument at 1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz). NEITHER OF THOSE IS A DE-EMBEDDED " +
                 $"S-PARAMETER. The full-wave two-port for a pair this close is measured accurate " +
                 $"only to cell/separation {PlanarLevels.FullWaveCellOverSeparation}; past that the " +
                 $"published series element loses its magnitude and then its sign (MIM-12's ladder: " +
@@ -5115,8 +5118,11 @@ public static class PlanarSolve
             $"cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 against forced-high " +
             $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the ELECTROSTATIC " +
             $"capacitance extracted from a plate pair — no port in it — within 1% of ε₀εᵣA/d over " +
-            $"the whole of it: 1.003 at cell/separation " +
-            $"75 and 0.996 at 300, where before it read −0.046 and −0.003. Past " +
+            $"the whole of it AT 10 GHz: 1.003 at cell/separation " +
+            $"75 and 0.996 at 300, where before it read −0.046 and −0.003. MIM-12 measured that " +
+            $"same instrument down the band and it does NOT hold there — 1.60 / 1.34 / −0.54 at " +
+            $"3 / 2 / 1 GHz on the same capacitor, because the kernel FIT carries 2.7e-2 at 1 GHz " +
+            $"against 8.3e-5 at 10 and a plate capacitance divides that by d/cell. Past " +
             $"{PlanarLevels.ValidatedCellOverSeparation} the FILL was not measured, and that half " +
             $"is unmeasured rather than known wrong. The FULL-WAVE answer is the other half and it " +
             $"is measured: past {PlanarLevels.FullWaveCellOverSeparation} the series element " +

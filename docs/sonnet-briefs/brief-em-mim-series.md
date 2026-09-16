@@ -122,6 +122,12 @@ rests on is already taken** and is tabulated in MIM-12; nothing before it needs 
     d/h = 1/200. Excluded by measurement: the mesh (2/4/8 cells across is the same wrong answer), the
     ports and de-embedding (the same structure minus the second level is passive and flat to 0.4 %),
     the electrostatic fill, and an active operator. **Weeks. Last.** → **MIM-12.**
+12a. **The film's own contribution is a closed form and the fit is extrapolating it.** MIM-12's step 0
+    refuted item 12's diagnosis: it is the KERNEL FIT, not dynamic range. A cross-region pairing has
+    nothing extracted, its near field is an image series at (2n+1)·d whose structure needs
+    k_ρ ≈ 5.0e6 m⁻¹, and the sampling path stops at 1.9e5 at every frequency — short by 26×. Peeling
+    six terms leaves a remainder flat to 0.4 % over four decades of ρ and 1.1e-3 of the kernel, which
+    is 0.08 % of the capacitance instead of 200 %. → **MIM-12a.**
 13. **The unknown budget.** Ceilings are 5,000 dense and 12,000 accelerated; the edge fan is
     expensive on a spiral for a reason the engine already prints; the cell count should be on screen
     before the solve, not after the refusal. Independent; take it whenever. → **MIM-13.**
@@ -130,6 +136,13 @@ rests on is already taken** and is tabulated in MIM-12; nothing before it needs 
 measurement.* MIM-8's instrument is excellent and its 1 % is true; it is simply not a statement about
 a de-embedded s-parameter, and the note that quoted it at a user whose capacitor had the wrong sign
 is the cost of not saying which one was measured.
+
+**And a second, added by MIM-12's step 0.** *A gate that constructs its own kernel can stop measuring
+what the application does.* MIM-8's capacitance fixture builds its own `PlanarKernelSet` and so never
+calls `Dcim.ForStackAtFrequency`, which every run calls — so it measured 10 GHz with no low-frequency
+widening and read 1.003 where the run's own arithmetic reads −0.54 at 1 GHz. The divergence was a
+whole sign and no test could see it. Item 12's own framing above is wrong for that reason and is
+corrected by 12a rather than edited away.
 
 **Conventions that bind every brief here** (same as `brief-em-perf-series.md`):
 

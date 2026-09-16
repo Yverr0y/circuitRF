@@ -484,7 +484,16 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
     // It reads P — the ω → 0 potential-coefficient matrix — off PlanarFill's own multi-level
     // builder, so it is the arithmetic a solve uses and not a second copy of it, and it is the
     // instrument PlanarStaticLimitTests already uses: hold one plate at 1 V, the other at 0 V, and
-    // report the charge that appears on the second. MIM-3 needed a whole de-embedded two-port to
+    // report the charge that appears on the second.
+    //
+    // MIM-12 FOUND THE ONE THING IT IS NOT: THE KERNEL IS FITTED AT 10 GHz, AND A RUN DOES NOT FIT
+    // IT THAT WAY. PlateCapacitanceRatio constructs its own PlanarKernelSet and so never calls
+    // Dcim.ForStackAtFrequency, which PlanarFrequencyKernel.Fit — i.e. every run — does. On this
+    // very capacitor, with this very instrument, the run's own fit reads 1.60 / 1.34 / −0.54 at
+    // 3 / 2 / 1 GHz against the 1.003 below. Nothing here is wrong; it is a statement about 10 GHz,
+    // and Mim12KernelFitTests.T2 is the same measurement down the band. The general shape of it is
+    // worth keeping: a gate that constructs its own kernel can stop measuring what the application
+    // does, and here the divergence is a whole sign. MIM-3 needed a whole de-embedded two-port to
     // ask this and had to truncate the stack to get a port at all (§MIM-3 finding 4: raw S cannot
     // carry a capacitance in this engine). Nothing here has a port in it.
 

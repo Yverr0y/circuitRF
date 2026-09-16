@@ -8621,3 +8621,127 @@ here is a statement about the run's mesh, not about the process.**
 | `src/Design/Layout/Em/EmRunService.cs` | passes it, built from `EmPortExtractionResult.SourceLabels` — index-aligned with the ports, never re-derived |
 | `examples/PDK PCells/README.md` | the LC-resonator page, and the correction of the section that said the full-wave path reads this capacitance back. It does not; the electrostatic fill does |
 | `tests/Ui.Tests/Em/MimResonatorCompositionTests.cs` | the two gates |
+
+# MIM-12 step 0 — where the capacitor's digits are lost (brief-em-mim-12-…, 2026-09-16)
+
+The verdict, and the three claims it retires, are `RESOLVED.md` §MIM-12. These are the tables.
+
+**Fixture throughout: the shipped 60 × 60 µm MIM capacitor** — two coincident plates on the
+`MimStack`, 0.2 µm of εᵣ = 6.8 film between them, at 4 cells across (15 µm pitch, cell/separation
+75), read by MIM-8's own 1 V / 0 V instrument (`PlanarFill.ScalarPotentialMatrix`, no port in it).
+`C` is always over ε₀εᵣA/d = 1.0838 pF.
+
+## Table 1 — the ELECTROSTATIC capacitance against the frequency the KERNEL IS FITTED AT
+
+Nothing geometric moves between these rows. The exact kernel does not move either (Table 3).
+`fitted as a run does` applies `Dcim.ForStackAtFrequency`, which `PlanarFrequencyKernel.Fit` applies
+and which MIM-8's own fixture does not.
+
+| f | as a run fits it | MIM-8's own fixture (no widening) |
+|---|---|---|
+| 10 GHz | **0.9995** | 1.0032 |
+| 5 GHz | 1.9066 | 0.9911 |
+| 3 GHz | **1.5953** | 0.0383 |
+| 2 GHz | **1.3413** | 0.0343 |
+| 1 GHz | **−0.5449** | 0.0306 |
+| 0.5 GHz | −0.2324 | 0.0105 |
+
+**Both columns are wrong below 5 GHz and they are wrong in different directions**, which is the
+sharpest available statement that the answer is tracking the fit rather than the physics.
+
+## Table 2 — it is not the conditioning
+
+| instrument | N | cond | answer |
+|---|---|---|---|
+| electrostatic P, 1 GHz | 32 cells | **5.75e2** | C/(ε₀εᵣA/d) = **−0.545** |
+| electrostatic P, 10 GHz | 32 cells | 2.66e2 | 1.003 |
+| full-wave Z, 0.5 GHz | 120 | 1.443e9 | — |
+| full-wave Z, 2 GHz | 120 | 1.230e8 | — |
+
+`min/max eig(Re Z)` at 0.5 GHz is **1.407e-11** (5.714e-8 against 4.061e3). The brief's own two
+numbers, reproduced to three figures — and the row above them is a conditioning of 575 with the sign
+already inverted.
+
+## Table 3 — the kernel against direct Sommerfeld integration
+
+`G_q` at ρ = 2 µm on the cross-level pairing (103 → 103.2 µm). The oracle's tail is asserted
+converged and is panel-count-invariant from 500 to 50,000 panels.
+
+| f | exact | fitted, relative error |
+|---|---|---|
+| 10 GHz | 5.655920e3 | 8.3e-5 |
+| 1 GHz | 5.656193e3 | **2.7e-2** |
+
+The exact kernel moves **4.8e-5** over a decade of frequency. Over the cell's own ρ range the fitted
+cross-level kernel is ~3e-2 wrong at 1 GHz against ~0.5e-2 for the same-level one, and the
+capacitance is a d/cell = 1/75 difference of the two:
+
+    error in C ≈ (relative error of the pairing kernels) / (d/cell)
+    10 GHz:  8.3e-5 × 75 = 0.6%     measured 1.003
+     1 GHz:  2.7e-2 × 75 = 200%     measured −0.545
+
+## Table 4 — the path extent, and why no setting is the fix
+
+`k_ρ,max = PathExtent · k₀` is the sampling path's reach; `1/k_ρ,max` is the finest spatial structure
+the fit ever sees. The window in which the capacitance is right **starts in the same place at every
+frequency and its top end closes as the frequency falls**:
+
+| k_ρ,max (1/k) | 10 GHz | 3 GHz | 2 GHz | 1 GHz |
+|---|---|---|---|---|
+| 2.0e4 (50 µm) | 0.023 | 0.039 | 0.040 | 0.038 |
+| 3.6e4 (28 µm) | 0.111 | 0.512 | 0.607 | 0.039 |
+| 4.7e4 (21 µm) | **1.007** | **1.000** | **1.017** | **1.018** |
+| 6.3e4 (16 µm) | **1.003** | **0.988** | **1.013** | **1.010** |
+| 8.4e4 (12 µm) | **1.012** | **1.003** | 1.206 | **1.000** |
+| 1.1e5 (8.9 µm) | **1.028** | **0.993** | 1.953 | 0.928 |
+| 1.5e5 (6.7 µm) | **1.019** | 2.140 | 5.675 | −0.306 |
+| 2.0e5 (5.0 µm) | **0.992** | 1.540 | −1.619 | −0.398 |
+| 4.7e5 (2.1 µm) | 0.856 | −0.995 | 1.475 | 0.213 |
+| 2.0e6 (0.5 µm) | 0.607 | 0.592 | 3.809 | 0.827 |
+
+The shipped widening targets `CalibratedPathProduct` = 20, which on this 106 µm stack is
+k_ρ,max = 1.9e5 — **inside the broken zone at every frequency below 10 GHz**. The default extent of
+300 happens to land on k_ρ,max = 6.3e4 at 10 GHz, which is why MIM-8 measured a good number. Neither
+is a rule anyone measured for a stack with a 0.2 µm layer in it, and the window is too narrow and too
+frequency-dependent to draw one from this table.
+
+## Table 5 — the widening is RIGHT, and this is what it is for
+
+Ordinary ONE-LEVEL GaAs starter, metal on the slab top, worst relative `G_q` error over
+ρ ∈ [2 µm, 1 mm] against direct Sommerfeld integration:
+
+| f | default extent 300 | widened to product 20 |
+|---|---|---|
+| 10 GHz | 1.8e-4 | 7.2e-5 |
+| 2 GHz | 9.3e-2 | 5.6e-4 |
+| 1 GHz | **4.6e-1** | **4.3e-4** |
+
+`G_A` is unaffected either way (2.3e-7 at 1 GHz). **Turning the widening off is not available**: every
+GaAs run below ~30 GHz needs it, because the default extent reaches a product of only 0.63 on a
+100 µm slab at 1 GHz.
+
+## Table 6 — the direct-Sommerfeld kernel: what it fixes and what it does not
+
+`PlanarFillSettings.DirectScalarKernel = true`, 256 table samples, the same fixture.
+
+| f | fitted | direct, 4 across | direct, 8 across |
+|---|---|---|---|
+| 10 GHz | 0.9995 | 1.0150 | 1.0210 |
+| 3 GHz | 1.5953 | 0.7543 | 0.7621 |
+| 2 GHz | 1.3413 | 0.7641 | 0.7693 |
+| 1 GHz | −0.5449 | 0.7531 | 0.7620 |
+
+**The frequency dependence is gone and so is the mesh dependence** — 0.75 at 1, 2 and 3 GHz on both
+meshes, against −0.54 … +1.60. It is 24 % low, and the residual is diagnosed rather than a tolerance.
+After MIM-8's shallow images are subtracted, the cross-level remainder at 1 GHz still runs
+
+| ρ | 0.02 µm | 0.09 µm | 0.2 µm | 0.43 µm | 0.93 µm | 2 µm |
+|---|---|---|---|---|---|---|
+| remainder (direct) | 2.32e4 | 1.89e4 | 1.05e4 | 2.55e3 | 8.67e1 | −1.42e2 |
+| remainder (fit says) | 8.9e-7 | 1.9e-5 | 8.9e-5 | 4.1e-4 | 1.9e-3 | 9.0e-3 |
+
+on a kernel whose own value there is 6.5e4. The images subtracted are the FIT's, and at 1 GHz the fit
+does not have the film's own structure in it, so a linear radial table at the mesh's 0.3 µm spacing
+cannot carry what is left. The second row is worth reading twice: **the fitted decomposition reports
+its own remainder as eight decades smaller than it is.** `FitResidual` cannot see this — it measures
+the exponentials against the samples, and it is the samples that are of the wrong function.

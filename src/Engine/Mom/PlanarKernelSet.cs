@@ -152,6 +152,14 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// 1.086 / 4.470 / −0.261 / −0.046 before and <b>1.003 at every one of them</b> after. The
     /// answer stopped depending on the mesh, which is what the constant is about.</para>
     ///
+    /// <para><b>BOTH LADDERS WERE MEASURED AT 10 GHz, and MIM-12 found that this is a condition
+    /// rather than a detail.</b> The fixtures here fit their kernel at the problem's own
+    /// <c>MaxFrequencyHz</c> of 10 GHz and never apply <see cref="Dcim.ForStackAtFrequency"/>, which
+    /// is what a RUN applies. On the very same 60 µm capacitor the same 1 V / 0 V instrument reads
+    /// <c>C/(ε₀εᵣA/d)</c> = 0.9995 at 10 GHz and <b>1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz</b> — the
+    /// shipped MMIC band. Nothing below is wrong; every figure in it is a statement about 10 GHz,
+    /// and the 1% is not carried down the band. <c>Mim12KernelFitTests.T2</c> holds that.</para>
+    ///
     /// <para><b>200 is where both ladders are measured and both hold</b>, MIM-3's own rule for
     /// drawing it. Past that they part company and the evidence gets confounded: ladder 2's 600 and
     /// 1200 rungs need a 480 µm and a 960 µm plate, which is no longer an electrically small
@@ -207,11 +215,24 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// rather than an obvious failure, which is why it is refused.</para>
     ///
     /// <para><b>MIM-12 WILL MOVE THIS NUMBER, and moving it is the expected outcome rather than a
-    /// rework.</b> The cause is a dynamic-range failure — on the 60 µm pair at 0.5 GHz the smallest
-    /// eigenvalue of Re(Z) is 5.7e-8 against a largest of 4.06e3, and cond(Z) is 1.4e9 — and the
-    /// remedies for it are MIM-12's own. Re-point this one constant at whatever that brief reaches
-    /// and leave the refusal standing; a fix that REMOVES the refusal instead of moving it is how
-    /// the next regime becomes silent.</para>
+    /// rework.</b> Re-point this one constant at whatever that brief reaches and leave the refusal
+    /// standing; a fix that REMOVES the refusal instead of moving it is how the next regime becomes
+    /// silent.</para>
+    ///
+    /// <para><b>THE CAUSE IS THE KERNEL FIT, NOT THE CONDITIONING — measured 2026-09-16, and the
+    /// sentence that stood here said otherwise.</b> It read "the cause is a dynamic-range failure",
+    /// from cond(Z) = 1.4e9 and a loss term 11 decades below the matrix on the 60 µm pair at
+    /// 0.5 GHz. Both numbers are real and reproduce exactly, and neither is the cause: the
+    /// ELECTROSTATIC instrument — <c>ScalarPotentialMatrix</c> over 32 cells, conditioned at 575 —
+    /// is ALREADY sign-inverted at 1 GHz. A factorisation that loses nine digits cannot be what
+    /// breaks an answer that is broken before the factorisation.</para>
+    ///
+    /// <para>What breaks it is that a plate pair's capacitance is a <c>d/cell</c> difference of two
+    /// INDEPENDENT DCIM fits, so it inherits <c>cell/d</c> times whatever relative error they carry.
+    /// The exact kernel does not move with frequency at all here (5.656193e3 at 1 GHz against
+    /// 5.655920e3 at 10 GHz, direct Sommerfeld), while the FIT carries 8.3e-5 at 10 GHz and 2.7e-2
+    /// at 1 GHz — and 2.7e-2 × 75 is 200%, which is the sign inversion. See
+    /// <c>Mim12KernelFitTests</c> and <c>RESOLVED.md</c> §MIM-12.</para>
     /// </summary>
     public const double FullWaveCellOverSeparation = 40.0;
 
@@ -344,6 +365,10 @@ public sealed class PlanarKernelSet
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _terms = new();
     private readonly Dictionary<(GreensKernel, double, double), PlanarKernelTerms> _reduced = new();
     private readonly Dictionary<(GreensKernel, double, double, double), ShallowImageSplit> _shallow = new();
+    /// <summary>MIM-12 — the same split with the fit replaced by direct Sommerfeld integration.
+    /// Keyed by the table's extent and sample count as well, because those are what it IS.</summary>
+    private readonly Dictionary<(GreensKernel, double, double, double, double, int), ShallowImageSplit>
+        _directShallow = new();
 
     public LayerStack Stack       => _greens.Stack;
     public double     FrequencyHz => _greens.FrequencyHz;
@@ -444,6 +469,83 @@ public sealed class PlanarKernelSet
         if (split.Removed.Count == 0) split = new ShallowImageSplit(Get(kernel, zA, zB), []);
 
         lock (_shallow) _shallow[key] = split;
+        return split;
+    }
+
+    /// <summary>
+    /// <b>MIM-12 — MIM-8's shallow-image split with the FIT replaced by direct Sommerfeld
+    /// integration, for the scalar kernel of a level pairing the mesh cannot resolve.</b>
+    ///
+    /// <para>Exactly <see cref="GetDirectMinusStaticAsymptotes"/>'s construction, one decomposition
+    /// over: keep every part that is exact — the extraction coefficients and the list of images
+    /// MIM-8 strips and re-integrates in closed form — and replace only the part that is fitted.
+    /// The assembled entry is <c>Extracted·(closed-form core) + Remainder·(quadrature)</c> with
+    /// <c>Remainder = full − Extracted</c>, so with <c>full</c> the direct integral the SUM is the
+    /// direct integral whatever the coefficients are.</para>
+    ///
+    /// <para><b>Why the scalar block of a thin pairing needs it, when nothing else does.</b> A
+    /// plate pair's capacitance is what is left after the same-level and cross-level potential
+    /// coefficients nearly cancel — on the shipped 0.2 µm film under a 15 µm cell the difference is
+    /// about 2% of either. The two pairings are two INDEPENDENT Prony fits whose own relative
+    /// accuracy is 1e-5 to 1e-2 and whose errors are uncorrelated, so the capacitance inherits
+    /// 200× whatever they carry. Measured (60 × 60 µm plate pair, d = 0.2 µm, four meshes), the
+    /// extracted <c>C/(ε₀εᵣA/d)</c> moves from 1.00 to −0.55 between two path extents that differ
+    /// only in which one the low-frequency widening happens to pick. The fitted kernel is the whole
+    /// error; nothing downstream of it can put the digits back.</para>
+    /// </summary>
+    /// <param name="shallowDepthM">MIM-8's threshold, the mesh's own cell against the pairing.</param>
+    /// <param name="rhoMaxM">The mesh's radial extent — the table must reach the widest pair.</param>
+    /// <param name="samples">Direct integration points. Each is one
+    /// <see cref="SommerfeldIntegral.EvaluateInterior"/>, which is why this is a setting.</param>
+    public ShallowImageSplit GetDirectMinusShallowImages(
+        GreensKernel kernel, double zA, double zB, double shallowDepthM,
+        double rhoMaxM, int samples)
+    {
+        if (!(rhoMaxM > 0))
+            throw new ArgumentOutOfRangeException(nameof(rhoMaxM), rhoMaxM,
+                "The direct scalar table needs a positive radial extent.");
+        if (samples < 8)
+            throw new ArgumentOutOfRangeException(nameof(samples), samples,
+                "The direct scalar table needs at least 8 samples.");
+
+        var k   = Key(kernel, zA, zB);
+        var key = (k.Kernel, k.Lo, k.Hi, shallowDepthM, rhoMaxM, samples);
+        lock (_directShallow)
+            if (_directShallow.TryGetValue(key, out var hit)) return hit;
+
+        // The FITTED split is still what decides which images are shallow and what the extraction
+        // coefficients are. Both are cheap, both are shared with every other view of this pairing,
+        // and neither is the thing that was measured failing.
+        var fitted  = GetMinusShallowImages(kernel, zA, zB, shallowDepthM);
+        var removed = fitted.Removed;
+        var terms0  = fitted.Terms;
+
+        Complex Full(double rho)
+        {
+            Complex v = SommerfeldIntegral.EvaluateInterior(_greens, kernel, rho, k.Hi, k.Lo).Value;
+            foreach (var im in removed)
+            {
+                Complex r = Complex.Sqrt(rho * rho + im.Depth * im.Depth);
+                if (r.Real < 0) r = -r;
+                v -= im.Amplitude / (4.0 * Math.PI * r);
+            }
+            return v;
+        }
+
+        // TABULATE THE REMAINDER, NOT THE KERNEL — GetDirectMinusStaticAsymptotes' own reason: the
+        // kernel still diverges as 1/ρ and a linear table cannot carry that, worst exactly at the
+        // self and touching pairs where most of the block's value is.
+        var table = RadialRemainderTable.BuildFrom(
+            rho => Full(rho) - terms0.Extracted(rho),
+            rhoMaxM, rhoMaxM / Math.Max(samples - 4, 4), samples);
+
+        var split = new ShallowImageSplit(
+            new PlanarKernelTerms(rho => table.Evaluate(rho) + terms0.Extracted(rho),
+                                  terms0.Inverse, terms0.Log, terms0.Constant, terms0.Linear,
+                                  _order, _rhoFloor, terms0.SmallestImageDepth),
+            removed);
+
+        lock (_directShallow) _directShallow[key] = split;
         return split;
     }
 

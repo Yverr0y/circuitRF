@@ -3,6 +3,121 @@
 Completed work's detail lands here instead of `CLAUDE.md`, which stays for durable, still-true
 conventions only. Same pattern as `src/Ui/DataDisplay/RESOLVED.md` and `src/Ui/Layout/Em/RESOLVED.md`.
 
+## MIM-12 step 0 — the capacitor's digits are lost in the KERNEL FIT, not in the solve (2026-09-16)
+
+`brief-em-mim-12-full-wave-thin-film-readback.md` §"The correction", step 0: *"The measurements above
+cannot separate two different losses, and the remedies for them are different… Do this before
+committing to anything below."* It has been done, and **it answers (b) and retires the brief's own
+diagnosis with it.** Every table is in `HISTORY.md` §MIM-12.
+
+**Nothing about a run's answer changed.** `PlanarFillSettings.DirectScalarKernel` is new and is OFF;
+with it off not one entry of the scalar potential matrix differs. What changed is four sentences in
+the code that were not true, and what is added is the measurement that says so.
+
+### The verdict, in one paragraph
+
+A plate pair's capacitance is what is left after the same-level and cross-level potential
+coefficients nearly cancel — on the shipped 0.2 µm film under a 15 µm cell the difference is
+`d/cell` = 1/75 of either. **The two pairings are two INDEPENDENT Prony fits**, so the capacitance
+inherits `cell/d` times whatever relative error they carry. The exact kernel does not move with
+frequency at all on this structure (5.656193e3 at 1 GHz against 5.655920e3 at 10 GHz by direct
+Sommerfeld integration, a converged oracle); the FIT carries **8.3e-5 at 10 GHz and 2.7e-2 at 1 GHz**.
+Multiply each by 75 and you get 0.6 % and 200 %, which is the measured 1.003 and the measured −0.545.
+**Every bit of the answer's frequency dependence is fit error.**
+
+### Findings
+
+**1. It is (b), and the missing digits are fourteen decades from where the brief looked.** The brief's
+step 0 separates "the SOLVE loses digits to conditioning", which iterative refinement recovers, from
+"the matrix ENTRIES never carried the small quantity", which no refinement can repair. It is the
+second — and the entries lose their digits to a fit whose own error is 1e-2, not to double precision
+at 1e-16. **The brief's item 1 is inapplicable rather than merely unlikely**, and so is its item 3:
+both are remedies for `cond(Z)`, and the answer is already destroyed where nothing is ill-conditioned.
+
+**2. The two numbers the brief diagnoses from are correct, and they are not the cause.** `cond(Z)` is
+1.443e9 at 0.5 GHz and `min/max eig(Re Z)` is 1.407e-11 — reproduced to three figures, and pinned in
+`Mim12KernelFitTests.T3` so they stay on the record. The refutation is one row above them in the same
+table: the ELECTROSTATIC instrument is a 32-cell system **conditioned at 575**, and at 1 GHz it
+already reads −0.545. A factorisation that loses nine digits cannot be what breaks an answer that is
+broken before the factorisation.
+
+**3. The brief's exclusion 3 — "not the electrostatic fill, MIM-8 did what it says it did" — is true
+only at 10 GHz, and this is the part worth carrying forward.** MIM-8's ladder is sound; its fixture
+simply fits the kernel at the problem's own `MaxFrequencyHz` and never calls
+`Dcim.ForStackAtFrequency`, which is what `PlanarFrequencyKernel.Fit` — i.e. every run — calls. On the
+same 60 µm capacitor with the same instrument, `C/(ε₀εᵣA/d)` reads 0.9995 at 10 GHz and
+**1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz**. The general shape of it: **a gate that constructs its own
+kernel is a gate that can stop measuring what the application does**, and here the divergence is a
+whole sign. `ValidatedCellOverSeparation`'s documentation now carries that condition, and so do the
+three run-visible arms of `LevelSeparationNotes` that quoted its 1 % at a reader in the MMIC band.
+
+**4. The low-frequency widening is RIGHT and removing it is not available.** The obvious reading of
+finding 3 is "the widening broke the MIM run". It did not: on an ordinary one-level GaAs problem at
+1 GHz `Dcim.ForStackAtFrequency` takes `G_q` from **46 % wrong to 4.3e-4**, and every GaAs run below
+~30 GHz is in that regime because the default `PathExtent` of 300 reaches a product of 0.63 on a
+100 µm slab. What the widening cannot do is carry a 0.2 µm film AND a 106 µm stack in one order
+budget — a 530:1 range of scales in one fit of ten exponentials — and the small end is the whole
+capacitor. **The defect is a property of the STACK, not of the knob**, which is why tuning the knob
+is not the fix either: the window of `PathExtent` in which the capacitance is right is
+frequency-dependent and only a factor of ~2 wide at 2 GHz (`HISTORY.md` Table 4).
+
+**5. `FitResidual` reports its own remainder as eight decades smaller than it is, and cannot see
+this.** At 1 GHz, ρ = 0.02 µm, the cross-level decomposition says its remainder is 8.9e-7; the true
+remainder is **2.3e4**, on a kernel whose value there is 6.5e4. The residual measures the fitted
+exponentials against the samples, and it is the SAMPLES that are of the wrong function — so the fit
+is self-validating in a metric that is blind to the failure. Anything that wants to know whether a
+fit is good enough here has to ask the direct integral.
+
+**6. The remedy is the brief's item 2, one level upstream of where the brief puts it.** Item 2 says to
+compute `P_self − P_cross` as one closed form rather than as two numbers subtracted. The purpose is
+right and the location is not: the error is in the KERNEL, so an exact cell-pair difference would
+integrate a wrong difference exactly. `PlanarFillSettings.DirectScalarKernel` (below) is the
+measurement that establishes this, and it points at the structural cause —
+**`LayeredSpectralGreens.AsymptoticAtHeights` returns zero coefficients for a CROSS-REGION pairing by
+design** (MIM-8's own finding 1), so a thin cross-level pairing's entire near field rests on fitted
+images with no closed form underneath it, while the same-level pairing beside it has an exact
+`1/ρ`. Two decompositions of different exactness, subtracted. Giving the cross-region pairing its own
+`k_ρ → ∞` asymptote is what would make the difference exact where the error is.
+
+### What was built
+
+**`PlanarFillSettings.DirectScalarKernel` / `ScalarTableSamples`, and `PlanarKernelSet.
+GetDirectMinusShallowImages`** — R-zz-3's `DirectVerticalKernel` construction, one block over: keep
+every part of the decomposition that is exact (the extraction coefficients, and MIM-8's list of
+shallow images and their closed forms) and replace only the part that is fitted, with a radial table
+of direct Sommerfeld integrations. **Off by default and bit-identical when off.**
+
+**It is a measurement, not yet a fix, and that is stated rather than implied.** With it on, the
+answer stops depending on the frequency and on the mesh — 0.75 at 1, 2 and 3 GHz on two meshes,
+against −0.54 / 1.34 / 1.60 — and it is 24 % low. The residual is diagnosed: the images it subtracts
+are the FIT's, and at 1 GHz the fit does not have the film's structure in it, so what is left still
+runs 2.3e4 → 87 over ρ = 0.02 … 0.93 µm and a linear table at the mesh's own 0.3 µm spacing cannot
+carry it. Finding 6 is where that goes next.
+
+### What was NOT done, and the brief's gates that are therefore unmet
+
+**The brief's five gates are not met and no floor moved.** `FullWaveCellOverSeparation` is still 40,
+`ValidatedCellOverSeparation` is still 200, and a run past the floor still refuses — which is the
+right state while the answer past it is still wrong. Specifically not done: the ladder re-run within
+10 % at cell/separation 200, the control's 3.427/3.429/3.441 fF re-measurement (it is a single-level
+structure and nothing here can have moved it), the bit-identity re-check on the airbridge fixture
+beyond the scalar-matrix identity `T5` asserts, and the user's spiral-plus-capacitor resonance.
+
+**Iterative refinement was not built** — finding 1 makes it inapplicable, and building it anyway
+would put a mechanism in the tree that the measurement says cannot act here.
+
+**The cross-region static asymptote was not derived.** It is finding 6, it is the real fix, and it is
+a formulation change rather than a tuning one.
+
+### Gates
+
+`Mim12KernelFitTests` — T1 (every bit of the frequency dependence is fit error, against a
+tail-converged oracle), T2 (MIM-8's own instrument, at the four frequencies, with the run's own fit),
+T3 (conditioning is not the cause, and the brief's own two numbers pinned beside it), T4 (the
+widening is what makes an ordinary run work), T5 (`DirectScalarKernel` off changes not one entry),
+T5b (`Category=Benchmark`, 2 m 33 s — what the direct kernel fixes and what it does not).
+Routine tier: 8 tests, 4 s.
+
 ## MIM-9 — the three notes that sent a user the wrong way (2026-09-16)
 
 `brief-em-mim-9-thin-film-diagnostics.md`. **Every change here is a reporting change on top of an

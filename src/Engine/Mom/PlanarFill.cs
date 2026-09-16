@@ -257,6 +257,14 @@ public sealed record PlanarFillSettings(
     int                   MaxTableSamples         = 1 << 15,
     bool                  DirectVerticalKernel    = false,
     int                   VerticalTableSamples    = 256,
+    // MIM-12 — the SCALAR block's own DirectVerticalKernel. A thin cross-level pairing's kernel
+    // comes entirely from fitted images (its k_ρ → ∞ asymptote is zero by design, MIM-8 finding 1)
+    // and a plate capacitance divides that pairing's error by d/cell, so the fit's 2.7e-2 at 1 GHz
+    // arrives as a 200% error with the wrong sign. This replaces the fitted part with direct
+    // Sommerfeld integration on a radial table. OFF: it removes the frequency and mesh dependence
+    // and is still 24% low, and RESOLVED.md §MIM-12 finding 6 says where the rest of it is.
+    bool                  DirectScalarKernel      = false,
+    int                   ScalarTableSamples      = 256,
     int                   ViaZNodes               = 2,
     int                   ViaZStaticNodes         = 10,
     bool                  Parallel                = true,
@@ -501,6 +509,9 @@ public sealed record PlanarFillSettings(
             "A radial table below 8 samples cannot carry its own interpolation stencil.");
         AtLeast(VerticalTableSamples, 8, nameof(VerticalTableSamples),
             "M2 measured the assembled ẑẑ block still moving 2.2e-3 at 32 samples and converged at 128.");
+        AtLeast(ScalarTableSamples, 8, nameof(ScalarTableSamples),
+            "MIM-12 measured the plate capacitance still moving 3% between 64 and 256 samples; " +
+            "below 8 the table cannot carry its own interpolation stencil.");
 
         if (!(TableCellFraction > 0))
             throw new ArgumentOutOfRangeException(nameof(TableCellFraction), TableCellFraction,
@@ -2491,9 +2502,30 @@ public static class PlanarFill
                     if (!cellLayers[lb]) continue;
                     double za = levels.Of(la), zb = levels.Of(lb);
                     double shallow = st.ShallowImageCells * Math.Max(layerCell[la], layerCell[lb]);
-                    var split = set.GetMinusShallowImages(GreensKernel.ScalarPotential, za, zb, shallow);
-                    var t = split.Terms.With(st.Order, cores.RhoFloorM);
-                    var f = Remainder(split.Terms, cores);
+
+                    // MIM-12 (R-zz-3's own shape, one block over) — the scalar block may take its
+                    // kernel from direct Sommerfeld integration rather than from the DCIM fit. The
+                    // fit is what fails on a thin pairing: a plate pair's capacitance is a ~d/cell
+                    // difference of two INDEPENDENT fits, so it inherits cell/d times whatever
+                    // relative error they carry. Reachable as a setting, exactly like
+                    // DirectVerticalKernel, and off by default.
+                    ShallowImageSplit split;
+                    PlanarKernelTerms t;
+                    Func<double, Complex> f;
+                    double rhoMaxQ = Math.Max(cores.ExtentM, cores.MinCellEdgeM * 8);
+                    if (st.DirectScalarKernel)
+                    {
+                        split = set.GetDirectMinusShallowImages(GreensKernel.ScalarPotential, za, zb,
+                                                                shallow, rhoMaxQ, st.ScalarTableSamples);
+                        t = split.Terms.With(st.Order, cores.RhoFloorM);
+                        f = t.Remainder;        // already a table; re-tabulating interpolates an interpolation
+                    }
+                    else
+                    {
+                        split = set.GetMinusShallowImages(GreensKernel.ScalarPotential, za, zb, shallow);
+                        t = split.Terms.With(st.Order, cores.RhoFloorM);
+                        f = Remainder(split.Terms, cores);
+                    }
                     r.TermsQ[la, lb]   = r.TermsQ[lb, la]   = t;
                     r.RemQ[la, lb]     = r.RemQ[lb, la]     = f;
                     r.ShallowQ[la, lb] = r.ShallowQ[lb, la] = split.Removed;
@@ -2504,6 +2536,16 @@ public static class PlanarFill
                     {
                         r.TermsQFar[la, lb] = r.TermsQFar[lb, la] = t;
                         r.RemQFar[la, lb]   = r.RemQFar[lb, la]   = f;
+                    }
+                    else if (st.DirectScalarKernel)
+                    {
+                        // The same direct kernel with NOTHING subtracted: shallowDepth 0 leaves the
+                        // removed list empty, so Full is the bare integral.
+                        var plainSplit = set.GetDirectMinusShallowImages(
+                            GreensKernel.ScalarPotential, za, zb, 0.0, rhoMaxQ, st.ScalarTableSamples);
+                        var pt = plainSplit.Terms.With(st.Order, cores.RhoFloorM);
+                        r.TermsQFar[la, lb] = r.TermsQFar[lb, la] = pt;
+                        r.RemQFar[la, lb]   = r.RemQFar[lb, la]   = pt.Remainder;
                     }
                     else
                     {
