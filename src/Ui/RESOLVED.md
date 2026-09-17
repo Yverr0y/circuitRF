@@ -1,5 +1,50 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Dropping a part on a wire broke into it, but only for the two probes (2026-09-17)
+
+Owner: the wire cut a WSProbe placement performs should work for every two-terminal part — R, L, C,
+NonlinearC and the rest.
+
+**The mechanism was already general; only the gate was not.** `FindShortedSpans` has never named a
+kind — it asks for exactly two pins, both landing on one straight wire segment, with nothing else
+inside the span — and the whole of what restricted it to probes was `IsSeriesProbe(kind)` at the
+call site, a two-name list that had already grown by one within a week of being written.
+
+**The list is gone rather than extended.** What qualifies is asked geometrically, in
+`SeriesPartInsertion.FindShortedSpans` and nowhere else: a part whose pins are not collinear with
+the run cannot satisfy it and never triggers, so the GESTURE is the opt-in and no kind has to be
+remembered. A vertical R dropped on a horizontal wire does nothing, as it did before; an MBEND,
+whose two pins are at right angles, can never trigger at all. R, L, C, NonlinearC, SRLC, a diode, a
+TLIN, a 2-port SnP and a two-pin cell of the user's own all arrive by the same route, as do both
+probes. A part with three or more pins is refused on the COUNT — there is no unambiguous pair to
+break the run between, and an MTEE's two collinear through-pins would otherwise strand its branch.
+
+**It matters more for a passive than it ever did for a probe.** A shorted probe reports nothing,
+which is at least visible in the results. A shorted R, L or C is quieter: the design simulates,
+converges and returns a plausible answer with the part contributing nothing, and the sheet says
+nothing because the wire and the part draw on top of each other.
+
+**The cell path got it too.** `CommitCellPlacementAsync` is the second commit path — cells from the
+picker, parts from an imported kit — and it ended in its own bare `PlaceComponentCommand`, so a
+two-pin cell dropped on a wire would have stayed shorted while a built-in R beside it did not. Both
+paths now fold the cuts in through one `WithSeriesWireCuts` helper, which is also where the
+"placement only" rule is documented: a later drag is a `MoveCommand` and a paste is
+`SchematicPasteCommand`, and neither passes through either commit path.
+
+Renames, because the old names said "probe": `SeriesProbeInsertion` → `SeriesPartInsertion`,
+`IsSeriesProbe` deleted, `CutWireSpanCommand`'s undo label "Clear Wire Under Probe" → "…Under Part",
+`SeriesProbePlacementClearsWireTests` → `SeriesPartPlacementClearsWireTests`.
+
+`AnotherComponentPlacedAcrossAWire_NeverCutsIt` pinned the old restriction with a resistor and is
+replaced by the four two-terminal cases at the foot of that file: the R/C/NonlinearC/diode/TLIN
+theory along a horizontal run, the unrotated vertical part on a vertical run (which also asserts
+both pins read Connected afterwards), the three-terminal refusal, and the across-the-wire non-case.
+Every refusal test above them is unchanged and still passes — the safety rule did not move.
+
+**Unchanged and still worth knowing:** a junction dot, another component's pin, a net label or a
+crossing wire inside the span refuses the cut silently. The user sees a part that did not break in,
+with no way to tell which of them it was.
+
 ## "Run This Analysis" dropped the sweeps wrapping the card (2026-09-16)
 
 Owner: the Analyses panel's card menu ▸ "Run This Analysis" did not run the enabled parametric

@@ -5,18 +5,20 @@ using CircuitRF.Ui.ViewModels;
 namespace CircuitRF.Ui.Tests;
 
 /// <summary>
-/// A SERIES PROBE placed onto a wire clears the stretch of wire between its own two pins, so the
-/// probe is in series with the run instead of shorted by it — but only at PLACEMENT, and only when
-/// the cut provably changes no circuit. See <see cref="SeriesProbeInsertion"/>.
+/// A TWO-TERMINAL PART placed onto a wire clears the stretch of wire between its own two pins, so
+/// the part is in series with the run instead of shorted by it — but only at PLACEMENT, and only
+/// when the cut provably changes no circuit. See <see cref="SeriesPartInsertion"/>.
 ///
-/// <para>These drive an IProbe because it is the shorter fixture; the kind is not what the rule
-/// turns on, and <c>WSProbePlacementTests</c> holds the other one.</para>
+/// <para>Most of these drive an IProbe because it is the shorter fixture — its pins are one
+/// connection pitch apart rather than the lumped primitives' four — but the KIND is not what the
+/// rule turns on: it is asked geometrically, so the R/L/C half is the same code and is gated by the
+/// two-terminal cases at the bottom. <c>WSProbePlacementTests</c> holds the WSProbe one.</para>
 ///
 /// <para>Grid snap is off in these fixtures on purpose: it lets a junction be put at the MIDDLE of
 /// the span between the two pins, which the shipped 100-unit connection grid has no coordinate for
 /// (the probe's pins are exactly one pitch apart). The rule under test is geometric, not grid-bound.</para>
 /// </summary>
-public class SeriesProbePlacementClearsWireTests
+public class SeriesPartPlacementClearsWireTests
 {
     // R0 IProbe pins sit at (X, Y+100) and (X+100, Y+100) — so this places the two pins at
     // (px, py) and (px+100, py).
@@ -295,20 +297,96 @@ public class SeriesProbePlacementClearsWireTests
         Assert.Equal([(0.0, 900.0), (500.0, 900.0)], Pts(model.Wires[0]));
     }
 
-    // ── Scope: placement only, series probes only ─────────────────────────────
+    // ── Every two-terminal part, not a list of kinds ──────────────────────────
 
-    [Fact]
-    public void AnotherComponentPlacedAcrossAWire_NeverCutsIt()
+    /// <summary>
+    /// The lumped primitives reach the same rule by the same route — a resistor is shorted by the
+    /// wire it is dropped on exactly as an ammeter is, and unlike the probe it still SIMULATES that
+    /// way, silently contributing nothing. R0 puts the two pins at local (0,±200), so a rotated
+    /// instance dropped on a horizontal run spans 400 of it.
+    /// </summary>
+    [Theory]
+    [InlineData(SymbolKind.Resistor)]
+    [InlineData(SymbolKind.Capacitor)]
+    [InlineData(SymbolKind.NonlinearC)]
+    [InlineData(SymbolKind.Diode)]        // its own pin table, not the two-terminal default
+    [InlineData(SymbolKind.Tline)]        // already horizontal: pins at local (±200, 0)
+    public void ATwoTerminalPartPlacedAlongAWire_CutsTheSpanBetweenItsPins(SymbolKind kind)
     {
         var (model, vm) = MakeVm();
-        AddWire(model, (0, 0), (500, 0));
+        AddWire(model, (0, 0), (900, 0));
 
-        // A resistor is two-terminal and shorts out just the same — and is still not the affordance.
-        vm.CommitPlacement(SymbolKind.Resistor, 2, SymbolRotation.R90, 250, 0);
+        // R90 for the vertical parts turns local (0,±200) into world (∓200, 0); TLIN is already
+        // horizontal and R90 would stand it up, so it is placed unrotated. Either way the pins land
+        // at (300,0) and (700,0).
+        var rot = kind == SymbolKind.Tline ? SymbolRotation.R0 : SymbolRotation.R90;
+        vm.CommitPlacement(kind, 2, rot, 500, 0);
+
+        Assert.Equal(2, model.Wires.Count);
+        Assert.Equal([(0.0, 0.0), (300.0, 0.0)],   Pts(model.Wires[0]));
+        Assert.Equal([(700.0, 0.0), (900.0, 0.0)], Pts(model.Wires[1]));
+    }
+
+    /// <summary>
+    /// The unrotated gesture: the lumped primitives draw vertically, so the run they break into is
+    /// a vertical one. Both pins read connected afterwards — the part is in series, not dangling.
+    /// </summary>
+    [Fact]
+    public void AVerticalPartOnAVerticalWire_LandsInSeriesAndConnectedBothSides()
+    {
+        var model = new SchematicEditModel();          // shipped grid, snap on
+        var vm    = new SchematicViewModel(model);
+        AddWire(model, (0, 0), (0, 900));
+
+        vm.CommitPlacement(SymbolKind.Inductor, 2, SymbolRotation.R0, 0, 500);
+
+        Assert.Equal(2, model.Wires.Count);
+        Assert.Equal([(0.0, 0.0), (0.0, 300.0)],   Pts(model.Wires[0]));
+        Assert.Equal([(0.0, 700.0), (0.0, 900.0)], Pts(model.Wires[1]));
+
+        var part = model.BuildRenderModel().Model.Components[0];
+        Assert.Equal(PortConnectionState.Connected, part.Ports[0].State);
+        Assert.Equal(PortConnectionState.Connected, part.Ports[1].State);
+    }
+
+    /// <summary>
+    /// A part that is NOT two-terminal has no unambiguous pair to break the run between, so nothing
+    /// is cut however its pins fall. A MESFET's gate and drain are 200 apart on the diagonal and
+    /// never collinear with one run anyway; the refusal is the pin COUNT, asserted on a part whose
+    /// third pin is the one that would be stranded.
+    /// </summary>
+    [Fact]
+    public void AThreeTerminalPartPlacedOverAWire_NeverCutsIt()
+    {
+        var (model, vm) = MakeVm();
+        AddWire(model, (0, 0), (900, 0));
+
+        // MTee: pins at local (-200,0), (200,0) — collinear with the run — and a third at (0,200).
+        vm.CommitPlacement(SymbolKind.MTee, 3, SymbolRotation.R0, 500, 0);
 
         Assert.Single(model.Wires);
-        Assert.Equal([(0.0, 0.0), (500.0, 0.0)], Pts(model.Wires[0]));
+        Assert.Equal([(0.0, 0.0), (900.0, 0.0)], Pts(model.Wires[0]));
     }
+
+    /// <summary>
+    /// A two-terminal part whose pins are not collinear with the run is left alone — the gesture
+    /// itself is the opt-in, so a part dropped ACROSS a wire rather than along it does nothing. An
+    /// MBEND is the permanent case: its two pins are at right angles and can never be collinear.
+    /// </summary>
+    [Fact]
+    public void ATwoTerminalPartDroppedAcrossTheWire_NeverCutsIt()
+    {
+        var (model, vm) = MakeVm();
+        AddWire(model, (0, 0), (900, 0));
+
+        vm.CommitPlacement(SymbolKind.Resistor, 2, SymbolRotation.R0, 500, 0);   // pins at (500,±200)
+        vm.CommitPlacement(SymbolKind.MBend,    2, SymbolRotation.R0, 700, 0);   // pins at (500,0)/(700,200)
+
+        Assert.Single(model.Wires);
+        Assert.Equal([(0.0, 0.0), (900.0, 0.0)], Pts(model.Wires[0]));
+    }
+
+    // ── Scope: placement only ─────────────────────────────────────────────────
 
     [Fact]
     public void DraggingAPlacedProbeOntoAWire_NeverCutsIt()

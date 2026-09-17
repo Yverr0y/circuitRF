@@ -5,17 +5,17 @@ namespace CircuitRF.Ui.Commands.Schematic;
 /// <summary>
 /// Removes the stretch of one wire between two points on a single segment of it, leaving the
 /// wire's two remaining pieces exactly where they were. This is the cut a user performs by hand
-/// after dropping a series probe onto a wire — see <see cref="SeriesProbeInsertion"/> for when it is
-/// allowed to happen for them, and for why a doubled run is several of these in one placement.
+/// after dropping a two-terminal part onto a wire — see <see cref="SeriesPartInsertion"/> for when
+/// it is allowed to happen for them, and for why a doubled run is several of these in one placement.
 ///
 /// <para>Unlike <see cref="DeleteSegmentsCommand"/> the cut is PARTIAL: it takes a sub-run of one
-/// segment rather than whole segments, because the two probe pins land wherever the user dropped
+/// segment rather than whole segments, because the part's two pins land wherever the user dropped
 /// them and need not coincide with the segment's own vertices.</para>
 ///
 /// <para>Either piece that collapses to fewer than two distinct points is simply not created — a
-/// probe pin landing on the wire's own end leaves nothing on that side, which is correct: whatever
-/// held that end (a component pin) now meets the probe pin at the same point instead. Undo restores
-/// the original wire object, so anything keyed on its identity comes back with it.</para>
+/// pin landing on the wire's own end leaves nothing on that side, which is correct: whatever held
+/// that end (a component pin) now meets the placed part's pin at the same point instead. Undo
+/// restores the original wire object, so anything keyed on its identity comes back with it.</para>
 /// </summary>
 internal sealed class CutWireSpanCommand : IUiCommand
 {
@@ -28,9 +28,9 @@ internal sealed class CutWireSpanCommand : IUiCommand
     // Taken at Execute and kept for Undo, which reverses them in the opposite order.
     private int _originalIndex;
 
-    public string Description => "Clear Wire Under Probe";
+    public string Description => "Clear Wire Under Part";
 
-    public CutWireSpanCommand(SchematicEditModel model, SeriesProbeInsertion.ShortedSpan span)
+    public CutWireSpanCommand(SchematicEditModel model, SeriesPartInsertion.ShortedSpan span)
     {
         _model    = model;
         _original = span.Wire;

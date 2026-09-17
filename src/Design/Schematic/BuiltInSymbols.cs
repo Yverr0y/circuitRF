@@ -985,7 +985,7 @@ public static class BuiltInSymbols
     // IProbe's dropped pins, which is what it had until 2026-09-08 — an IProbe hangs BELOW the wire
     // it measures, and copying that geometry made every WSProbe dropped into a horizontal run bend
     // the wire through 90 degrees at each end. It is still placed into a wire the same way, and the
-    // wire-cut affordance (SeriesProbeInsertion) still has both pins on one straight segment.
+    // wire-cut affordance (SeriesPartInsertion) still has both pins on one straight segment.
     //
     // The leads stop at the body edge (x = 15 and x = 85) rather than crossing it: a line drawn
     // through the middle of the body ran straight through the G and L letters, which are the only

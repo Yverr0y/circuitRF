@@ -1,22 +1,31 @@
 namespace CircuitRF.Ui.Schematic;
 
 /// <summary>
-/// The wire a SERIES PROBE shorts out the moment it is placed, and the rule for when circuitRF may
-/// clear it.
+/// The wire a TWO-TERMINAL PART shorts out the moment it is placed, and the rule for when circuitRF
+/// may clear it.
 ///
-/// <para><b>Why this exists.</b> A series probe is a 0 V short: it reports on the branch it is IN,
-/// so it is only useful placed IN a wire. The natural gesture is to drop it onto the wire whose
-/// current is wanted — at which point both of its pins land on that wire and the probe is shorted
-/// by the very run it was meant to break into, reading nothing. Every user then performs the same
-/// second gesture: delete the stretch of wire between the two pins. This finds that stretch so the
-/// placement can do it for them.</para>
+/// <para><b>Why this exists.</b> The natural gesture for putting a part in series is to drop it onto
+/// the wire whose current is to go through it — at which point both of its pins land on that wire
+/// and the part is shorted by the very run it was meant to break into. Every user then performs the
+/// same second gesture: delete the stretch of wire between the two pins. This finds that stretch so
+/// the placement can do it for them.</para>
 ///
-/// <para><b>Two kinds are series probes</b> (<see cref="IsSeriesProbe"/>): the
-/// <see cref="SymbolKind.IProbe"/> this was written for, and the
-/// <see cref="SymbolKind.WSProbe"/>, which is electrically the same 0 V short and is placed the
-/// same way. A shorted WSProbe is worse than a shorted ammeter, not better — its whole output is
-/// the <c>wsp</c> matrix of the node it was meant to split, and a node it never split has none. The
-/// headless twin of this rule is <c>check</c>'s <c>wsprobe.shorted</c>.</para>
+/// <para><b>There is no list of kinds, and deliberately so.</b> It began as an IProbe affordance and
+/// grew a second kind (the WSProbe) by the end of the same week; the list was the part that had to
+/// be remembered, and a part left off it fails by doing nothing. What qualifies is asked
+/// GEOMETRICALLY instead, here and nowhere else: exactly two pins, both landing on ONE straight
+/// segment of wire. A part whose pins are not collinear with the run — a vertical R dropped on a
+/// horizontal wire, an MBEND, whose two pins are at right angles — cannot satisfy it and never
+/// triggers, so the gesture itself is the opt-in. R, L, C, NonlinearC, SRLC, a diode, a TLIN, a
+/// 2-port SnP, a two-pin cell of the user's own and both series probes all reach it by the same
+/// route.</para>
+///
+/// <para><b>A shorted part is worse than it looks</b>, which is why this is not cosmetic. A probe
+/// that is shorted reports nothing — an IProbe reads no current, and a WSProbe's whole output is the
+/// <c>wsp</c> matrix of a node it never split. A shorted R, L or C is quieter still: the design
+/// SIMULATES, converges and returns a plausible answer with the part contributing nothing, and
+/// nothing on the sheet says so because the wire and the part draw on top of each other. The
+/// headless twin of the probe half of this rule is <c>check</c>'s <c>wsprobe.shorted</c>.</para>
 ///
 /// <para><b>The result must be electrically identical to the hand edit</b>, and that is the whole
 /// constraint on <see cref="FindShortedSpans"/>. The cut is allowed only when the two pins sit on
@@ -28,7 +37,7 @@ namespace CircuitRF.Ui.Schematic;
 ///
 /// <para><b>Several wires can carry the same run, and then every one of them is cut.</b> Two wires
 /// drawn along the same line draw as ONE line, so a run that is doubled is invisible on the sheet —
-/// and cutting only one of them leaves the other still shorting the probe, which is why this used
+/// and cutting only one of them leaves the other still shorting the part, which is why this used
 /// to refuse the whole placement there rather than half-do it. Refusing was silent, and the sheet
 /// gives the user nothing to look at, so the affordance simply stopped working on that run with no
 /// way to find out why. Cutting the span out of ALL of them is the hand edit, exactly: the same
@@ -36,23 +45,16 @@ namespace CircuitRF.Ui.Schematic;
 /// judgement — a second wire whose own vertex falls INSIDE the span is still refused below, so any
 /// wire that reaches this point spans the whole cut and is in the same position as the first.</para>
 ///
-/// <para><b>Placement only.</b> The caller is <c>SchematicViewModel.CommitPlacement</c>, the single
-/// commit path for the click-arm and drag-and-drop placements — so a later drag of a placed probe
-/// reaches none of this, and a paste or a type-change does not either. There is deliberately no
-/// "has this already run" flag on the component: the one entry point IS the once.</para>
+/// <para><b>Placement only.</b> The callers are <c>SchematicViewModel.CommitPlacement</c> and
+/// <c>CommitCellPlacementAsync</c> — the two commit paths, covering the click-arm, the
+/// drag-and-drop and the cell/kit placements — so a later drag of a placed part reaches none of
+/// this, and a paste or a type-change does not either. There is deliberately no "has this already
+/// run" flag on the component: the entry points ARE the once.</para>
 ///
 /// <para>Framework-free (no Avalonia), like <see cref="WireGeometry"/> — headless-testable.</para>
 /// </summary>
-public static class SeriesProbeInsertion
+public static class SeriesPartInsertion
 {
-    /// <summary>
-    /// The kinds this affordance is for: a two-terminal 0 V short whose whole purpose is to break
-    /// into a branch. Asked here rather than listed at the call site, so a third series probe
-    /// cannot be added and silently miss the wire cut.
-    /// </summary>
-    public static bool IsSeriesProbe(SymbolKind kind)
-        => kind is SymbolKind.IProbe or SymbolKind.WSProbe;
-
     /// <summary>
     /// The stretch of wire to remove: which wire, which of its segments, and the two cut points
     /// in that segment's own order — <paramref name="First"/> is the one nearer the segment's
@@ -65,21 +67,23 @@ public static class SeriesProbeInsertion
         (double X, double Y) Second);
 
     /// <summary>
-    /// The spans <paramref name="probe"/> would be shorted by — one per wire carrying the run, or
-    /// empty when there is none or when removing them would change the circuit.
-    /// <paramref name="probe"/> is the component about to be placed and is NOT expected to be in
-    /// <paramref name="model"/> yet — which is also what keeps its own pins out of the "something
-    /// else is in the way" scan.
+    /// The spans <paramref name="part"/> would be shorted by — one per wire carrying the run, or
+    /// empty when there is none, when the part is not two-terminal, or when removing them would
+    /// change the circuit. <paramref name="part"/> is the component about to be placed and is NOT
+    /// expected to be in <paramref name="model"/> yet — which is also what keeps its own pins out of
+    /// the "something else is in the way" scan.
     /// </summary>
     public static IReadOnlyList<ShortedSpan> FindShortedSpans(
-        SchematicEditModel model, EditableComponent probe)
+        SchematicEditModel model, EditableComponent part)
     {
         const double tol = SchematicEditModel.ConnectTolerance;
 
-        var defs = model.PortDefsOf(probe);
+        // Exactly two pins IS the membership test — see the class remarks. A one-pin part has no
+        // span, and a part with three or more has no unambiguous pair to break the run between.
+        var defs = model.PortDefsOf(part);
         if (defs.Count != 2) return [];
-        var a = model.PortWorldOf(probe, defs[0]);
-        var b = model.PortWorldOf(probe, defs[1]);
+        var a = model.PortWorldOf(part, defs[0]);
+        var b = model.PortWorldOf(part, defs[1]);
         if (SchematicGeometry.CoincidentPoints(a.X, a.Y, b.X, b.Y, tol)) return [];
 
         // Both pins on ONE straight segment. Two pins on two different segments of the same run
@@ -110,8 +114,8 @@ public static class SeriesProbeInsertion
 
     /// <summary>
     /// True when nothing but wire occupies the OPEN stretch between the two cut points. The two
-    /// ends themselves are excluded on purpose: that is where the probe's own pins land, and a
-    /// wire, pin or dot meeting the run exactly there stays connected to the probe afterwards.
+    /// ends themselves are excluded on purpose: that is where the part's own pins land, and a
+    /// wire, pin or dot meeting the run exactly there stays connected to the part afterwards.
     /// </summary>
     private static bool SpanIsClear(SchematicEditModel model, List<ShortedSpan> cuts)
     {
@@ -164,7 +168,7 @@ public static class SeriesProbeInsertion
 
     /// <summary>
     /// True when segment (p,q) lies along the same line as the span and overlaps more than a single
-    /// point of it — a duplicate run of wire the cut would leave behind, still shorting the probe.
+    /// point of it — a duplicate run of wire the cut would leave behind, still shorting the part.
     /// Neither <see cref="SchematicGeometry.SegmentsIntersectInterior"/> (which rejects parallels)
     /// nor the vertex test above sees this one when the duplicate outreaches the span at both ends.
     /// </summary>

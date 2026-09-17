@@ -3440,27 +3440,37 @@ public sealed partial class SchematicViewModel : ObservableObject
                 numParam.Expression = NextFreePinNum(EditModel).ToString();
         }
 
-        // A series probe (IProbe or WSProbe) dropped onto a wire is shorted out by that wire and
-        // reads nothing until the user deletes the stretch between its two pins — so do it for them,
-        // as part of the SAME undoable placement. Only ever here: this is the placement path, so a
-        // later drag of the probe cannot reach it, and the span is cleared only when
-        // SeriesProbeInsertion has proved the cut carries no junction and therefore changes no
-        // circuit. Which kinds count is that class's own question. See it.
-        IUiCommand place = new PlaceComponentCommand(EditModel, comp);
-        if (SeriesProbeInsertion.IsSeriesProbe(kind))
-        {
-            // Every wire carrying the run, not just one: a doubled run draws as a single line, so
-            // cutting one of the pair and leaving the other would short the probe under a sheet
-            // that looks exactly right. The cuts are built BEFORE any of them runs, so each reads
-            // the wire list the user dropped onto.
-            var cuts = SeriesProbeInsertion.FindShortedSpans(EditModel, comp);
-            for (int i = cuts.Count - 1; i >= 0; i--)
-                place = new CompositeCommand(new CutWireSpanCommand(EditModel, cuts[i]), place);
-        }
-
-        Execute(place);
+        Execute(WithSeriesWireCuts(new PlaceComponentCommand(EditModel, comp), comp));
         SelectPlacedPart(comp.Id);
         ComponentPlaced?.Invoke(kind);
+    }
+
+    /// <summary>
+    /// Folds the wire cuts a two-terminal part dropped ONTO a wire needs into the same undoable
+    /// placement — the stretch of wire between its own two pins, which would otherwise short it out.
+    ///
+    /// <para>Called by both commit paths (<see cref="CommitPlacement"/> for a built-in kind,
+    /// <see cref="CommitCellPlacementAsync"/> for a cell or kit part) and by nothing else, which is
+    /// what makes "only when first placed" a property of the call graph rather than of a persisted
+    /// flag. A later drag is a <c>MoveCommand</c> and a paste is <c>SchematicPasteCommand</c>;
+    /// neither passes through here.</para>
+    ///
+    /// <para><b>Which parts qualify is not asked here.</b> There is no list of kinds:
+    /// <see cref="SeriesPartInsertion.FindShortedSpans"/> answers it geometrically — two pins, both
+    /// on one straight segment, nothing else inside the span — and returns nothing for everything
+    /// else. See that class for why a list was the wrong shape.</para>
+    ///
+    /// <para>Every wire carrying the run is cut, not just one: a doubled run draws as a single
+    /// line, so cutting one of a pair and leaving the other would short the part under a sheet that
+    /// looks exactly right. The cuts are built BEFORE any of them runs, so each reads the wire list
+    /// the user dropped onto.</para>
+    /// </summary>
+    private IUiCommand WithSeriesWireCuts(IUiCommand place, EditableComponent comp)
+    {
+        var cuts = SeriesPartInsertion.FindShortedSpans(EditModel, comp);
+        for (int i = cuts.Count - 1; i >= 0; i--)
+            place = new CompositeCommand(new CutWireSpanCommand(EditModel, cuts[i]), place);
+        return place;
     }
 
     /// <summary>
@@ -3740,7 +3750,9 @@ public sealed partial class SchematicViewModel : ObservableObject
         if (PdkKitRegistry.IsKitRef(cellRef))
             MicrostripSubstrateInjection.ApplyTechnologyLengthUnit(comp.Parameters, EditModel.SchematicDirectory);
 
-        Execute(new PlaceComponentCommand(EditModel, comp));
+        // A two-pin cell or kit part dropped onto a wire is shorted by it exactly as a built-in R
+        // is, and the gesture is the same one — so it gets the same cut, through the same helper.
+        Execute(WithSeriesWireCuts(new PlaceComponentCommand(EditModel, comp), comp));
         SelectPlacedPart(comp.Id);
     }
 
