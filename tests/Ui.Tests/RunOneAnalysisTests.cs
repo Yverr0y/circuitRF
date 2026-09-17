@@ -9,8 +9,8 @@ using Xunit;
 namespace CircuitRF.Ui.Tests;
 
 /// <summary>
-/// The Analyses panel's card menu ▸ "Run This Analysis" — one card, not the list. The narrowing is a
-/// parameter on <see cref="SchematicRunService.Prepare"/> rather than a second run path, so these
+/// The Analyses panel's card menu ▸ "Run This Analysis" — one CHAIN, not the whole list. The narrowing
+/// is a parameter on <see cref="SchematicRunService.Prepare"/> rather than a second run path, so these
 /// tests state what the narrowed PLAN contains; everything after the plan (elaboration, the engines,
 /// the results file) is the ordinary run and is already covered.
 /// </summary>
@@ -42,35 +42,91 @@ public sealed class RunOneAnalysisTests
     }
 
     /// <summary>
-    /// Naming the INNER sweep runs that sweep and everything it wraps, and nothing that wraps IT:
-    /// 4 points over Rb, no Ra axis. Running the outer chain instead would be 12 points — which is
-    /// exactly the mistake "only that parametric sweep gets run" forbids.
+    /// Naming ANY card of a chain runs the whole chain — every enabled sweep wrapping it included.
+    /// Dispatching the card alone drops those axes and still returns a converged, complete-looking
+    /// result, which is the mistake nobody can see: 12 points over Ra x Rb, not SW_INNER's 4 and not
+    /// SP1's bare 2. This is the CLI's own rule for <c>-a</c>.
     /// </summary>
-    [Fact]
-    public void RunOne_OnAnInnerSweep_RunsThatSweepOnly_NotTheOuterOneWrappingIt()
+    [Theory]
+    [InlineData("SP1")]        // the base analysis
+    [InlineData("SW_INNER")]   // the sweep in the middle
+    [InlineData("SW_OUTER")]   // the chain root, which was never in doubt
+    public void RunOne_OnAnyCardOfAChain_RunsEverySweepWrappingIt(string card)
     {
         var plan = WithNetlist(NestedSweepCnl,
-            path => SchematicRunService.Prepare(path, null, "SW_INNER"));
+            path => SchematicRunService.Prepare(path, null, card));
 
         Assert.Equal(RunStatus.Success, plan.Status);
         var line = Assert.Single(plan.Lines);
-        Assert.Contains("4 pt(s) over Rb", line);
-        Assert.DoesNotContain("over Ra", line);
-        Assert.Equal(4, plan.TotalWorkUnits);   // the sweep's own leaf points, as a full run counts them
+        Assert.Contains("over Ra", line);
+        Assert.Contains("over Rb", line);
+        Assert.Equal(3 * 4, plan.TotalWorkUnits);   // exactly what the unnarrowed run plans
     }
 
-    /// <summary>Naming the BASE analysis runs it bare — no sweep axis at all.</summary>
+    /// <summary>
+    /// The promotion is REPORTED, because the run is about to do more than the card that was
+    /// right-clicked says. A chain root, promoted from nothing, says nothing.
+    /// </summary>
     [Fact]
-    public void RunOne_OnTheBaseAnalysis_RunsItWithNoSweepAxis()
+    public void APromotedRun_SaysSo_AndAnUnpromotedOneDoesNot()
     {
-        var plan = WithNetlist(NestedSweepCnl,
+        var promoted = WithNetlist(NestedSweepCnl,
             path => SchematicRunService.Prepare(path, null, "SP1"));
+        var note = Assert.Single(promoted.Notes);
+        Assert.Contains("SP1", note);
+        Assert.Contains("SW_OUTER", note);
+
+        var root = WithNetlist(NestedSweepCnl,
+            path => SchematicRunService.Prepare(path, null, "SW_OUTER"));
+        Assert.Empty(root.Notes);
+    }
+
+    /// <summary>
+    /// The narrowing is still a narrowing: a second chain declared in the same schematic does not run.
+    /// That is the whole of what this menu item does that the Run button does not.
+    /// </summary>
+    [Fact]
+    public void RunOne_RunsOneChain_AndLeavesTheOtherChainsAlone()
+    {
+        const string twoChains = """
+            Ra = 50
+            R:R1  in mid  R=Ra Ohm
+            R:R2  mid 0    R=50 Ohm
+            Term:T1  in  0   Num=1 Z=50 Ohm
+            Term:T2  mid 0   Num=2 Z=50 Ohm
+            analysis SP1 type=sparam start=1 GHz stop=2 GHz step=1 GHz
+            analysis SW1 type=parametric_sweep Var=Ra Values=10,20,30 Inner=SP1
+            analysis SP2 type=sparam start=1 GHz stop=5 GHz step=1 GHz
+            """;
+
+        var narrowed = WithNetlist(twoChains, path => SchematicRunService.Prepare(path, null, "SP1"));
+        Assert.Equal(RunStatus.Success, narrowed.Status);
+        Assert.Single(narrowed.Lines);
+        Assert.Equal(3, narrowed.TotalWorkUnits);             // SW1's 3 sweep points, and only those
+
+        var all = WithNetlist(twoChains, path => SchematicRunService.Prepare(path));
+        Assert.Equal(2, all.Lines.Count);
+        Assert.Equal(3 + 5, all.TotalWorkUnits);             // SP2's 5 frequencies as well
+    }
+
+    /// <summary>
+    /// A DISABLED outer sweep still collapses under promotion — the checkbox drops that axis and the
+    /// run lands on the outermost sweep that is actually enabled, exactly as the Run button's would.
+    /// </summary>
+    [Fact]
+    public void RunOne_PromotesPastADisabledOuterSweep_NotOntoIt()
+    {
+        var cnl = NestedSweepCnl.Replace(
+            "analysis SW_OUTER type=parametric_sweep Var=Ra Values=10,20,30 Inner=SW_INNER",
+            "analysis SW_OUTER type=parametric_sweep Var=Ra Values=10,20,30 Inner=SW_INNER enabled=false");
+
+        var plan = WithNetlist(cnl, path => SchematicRunService.Prepare(path, null, "SP1"));
 
         Assert.Equal(RunStatus.Success, plan.Status);
         var line = Assert.Single(plan.Lines);
-        Assert.Contains("S-param", line);
-        Assert.DoesNotContain("Parametric sweep", line);
-        Assert.Equal(2, plan.TotalWorkUnits);
+        Assert.Contains("over Rb", line);
+        Assert.DoesNotContain("over Ra", line);
+        Assert.Equal(4, plan.TotalWorkUnits);
     }
 
     /// <summary>

@@ -54,22 +54,11 @@ internal static class ChainSelector
         TestBench tb, string? requested, Func<Analysis, bool> isBase,
         string kindLabel, string directiveHint)
     {
-        // Names referenced as somebody's inner are not chain roots.
-        var inner = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var a in tb.Analyses)
-            if (a is ParametricSweepAnalysis ps && !string.IsNullOrEmpty(ps.InnerAnalysisName))
-                inner.Add(ps.InnerAnalysisName);
-
-        // Roots whose chain bottoms out in the verb's own base analysis and actually runs.
+        // Runnable chain roots (AnalysisChain owns that rule — the Analyses panel resolves the same
+        // list), narrowed to the ones bottoming out in the verb's own base analysis.
         var candidates = new List<Analysis>();
-        foreach (var root in tb.Analyses)
-        {
-            if (inner.Contains(root.Name)) continue;
-            var top = AnalysisChain.ResolveEffectiveTop(root, tb);
-            if (top is null || !top.Enabled) continue;
-            if (!AnalysisChain.IsChainRunnable(top, tb)) continue;
+        foreach (var top in AnalysisChain.RunnableTops(tb))
             if (BaseOfChain(top, tb) is { } base_ && isBase(base_)) candidates.Add(top);
-        }
 
         if (requested is not null)
         {
@@ -96,10 +85,10 @@ internal static class ChainSelector
         return new ChainSelection(candidates[0], candidates, null, null, null);
     }
 
-    /// <summary>The promotion note, worded exactly as the run verbs have always worded it.</summary>
+    /// <summary>The promotion note, worded exactly as the run verbs have always worded it — and now
+    /// worded in exactly one place, because the Analyses panel reports the same promotion.</summary>
     public static string PromotionNote(Analysis promotedFrom, Analysis owner) =>
-        $"'{promotedFrom.Name}' is the inner analysis of '{owner.Name}' — running '{owner.Name}' " +
-        $"so the sweep axis is not lost.";
+        AnalysisChain.PromotionNote(promotedFrom, owner);
 
     /// <summary>The ambiguity note, worded exactly as the run verbs have always worded it.</summary>
     public static string AmbiguityNote(ChainSelection sel, string kindLabel) =>
@@ -117,14 +106,5 @@ internal static class ChainSelector
     }
 
     public static bool ChainContains(Analysis top, string name, TestBench tb)
-    {
-        Analysis? a = top;
-        for (int guard = 0; a is not null && guard < 64; guard++)
-        {
-            if (a.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
-            if (a is not ParametricSweepAnalysis ps) return false;
-            a = AnalysisChain.ResolveEffectiveInner(ps.InnerAnalysisName, tb);
-        }
-        return false;
-    }
+        => AnalysisChain.ChainContains(top, name, tb);
 }

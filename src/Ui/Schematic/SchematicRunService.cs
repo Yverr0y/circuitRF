@@ -102,6 +102,14 @@ public sealed class RunPlan
     /// <summary>One line per analysis that will run, in run order — the pre-flight description.</summary>
     public IReadOnlyList<string> Lines { get; }
 
+    /// <summary>
+    /// What the PLAN worked out and is reporting, as opposed to what it will run: today the one
+    /// sentence a narrowed run writes when the named card was promoted to the sweep wrapping it.
+    /// Separate from <see cref="Lines"/> because that list is one entry per dispatched analysis and a
+    /// caller counts it.
+    /// </summary>
+    public IReadOnlyList<string> Notes { get; }
+
     /// <summary>Total leaf work units across every planned analysis. 0 = nothing countable.</summary>
     public long TotalWorkUnits { get; }
 
@@ -112,11 +120,13 @@ public sealed class RunPlan
     internal IReadOnlyList<PlannedAnalysis> Analyses { get; init; } = [];
 
     internal RunPlan(RunStatus status, string message,
-                     IReadOnlyList<string>? lines = null, long totalWorkUnits = 0)
+                     IReadOnlyList<string>? lines = null, long totalWorkUnits = 0,
+                     IReadOnlyList<string>? notes = null)
     {
         Status         = status;
         StatusMessage  = message;
         Lines          = lines ?? [];
+        Notes          = notes ?? [];
         TotalWorkUnits = totalWorkUnits;
     }
 }
@@ -137,9 +147,15 @@ public static class SchematicRunService
     /// <see cref="Execute"/> rather than being thrown away — so splitting the run in two costs nothing.
     /// Never throws.
     /// <para/>
-    /// <paramref name="onlyAnalysisName"/> narrows the run to ONE card: the named analysis is planned as
-    /// its own top, so a sweep wrapping it is <b>not</b> run and a sweep named here runs with everything
-    /// inside it. That is the whole difference between the panel's "Run This Analysis" and its Run
+    /// <paramref name="onlyAnalysisName"/> narrows the run to ONE CHAIN: the named analysis is
+    /// <b>promoted to the outermost enabled sweep that wraps it</b> (<see
+    /// cref="AnalysisChain.PromoteToRunnableTop"/>), so every parametric sweep the card belongs to runs
+    /// and the other chains in the schematic do not. Naming the base analysis and naming the sweep over
+    /// it therefore run the same thing — which is the point: a chain dispatched at its inner analysis
+    /// drops the sweep axis and still produces a converged, plausible, complete-looking result, so the
+    /// mistake is invisible. This is the CLI's own rule for <c>-a</c>, shared rather than restated.
+    /// <para/>
+    /// That narrowing is the whole difference between the panel's "Run This Analysis" and its Run
     /// button — the netlist, the elaboration and the engines are identical either way, which is why the
     /// narrowing lives here rather than in a second run path.
     /// </summary>
@@ -201,20 +217,15 @@ public static class SchematicRunService
         // ── 4. Plan each analysis ──────────────────────────────────────────────
         var planned   = new List<PlannedAnalysis>();
         var lines     = new List<string>();
+        var notes     = new List<string>();
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // A chain "root" is an analysis that no sweep references as its inner (the outermost level).
-        // We dispatch exactly one effective top per chain; everything below runs via the engine.
-        var referencedAsInner = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var a in tb.Analyses)
-            if (a is ParametricSweepAnalysis ps && !string.IsNullOrEmpty(ps.InnerAnalysisName))
-                referencedAsInner.Add(ps.InnerAnalysisName);
 
         if (onlyAnalysisName is not null)
         {
-            // ONE card, exactly as the panel drew it. Named rather than indexed because the netlist is
-            // re-extracted for every run and an index into tb.Analyses is not the index the panel row
-            // had; a name that no longer resolves is reported, never silently widened to a full run.
+            // ONE chain, picked by the card the user pointed at. Named rather than indexed because the
+            // netlist is re-extracted for every run and an index into tb.Analyses is not the index the
+            // panel row had; a name that no longer resolves is reported, never silently widened to a
+            // full run.
             var one = tb.Analyses.FirstOrDefault(
                 a => string.Equals(a.Name, onlyAnalysisName, StringComparison.OrdinalIgnoreCase));
 
@@ -228,21 +239,22 @@ public static class SchematicRunService
                 return new RunPlan(RunStatus.NoAnalysis,
                     $"Run this analysis: '{one.Name}' has nothing to run — the analysis it sweeps is disabled.");
 
-            PlanOne(one);
+            // The enabled sweeps WRAPPING the card run too: dispatching the card alone drops their
+            // axes, and a one-point loadpull looks exactly like the swept one the user asked for.
+            var dispatched = AnalysisChain.PromoteToRunnableTop(one, tb);
+            if (!ReferenceEquals(dispatched, one))
+                notes.Add(AnalysisChain.PromotionNote(one, dispatched));
+
+            PlanOne(dispatched);
         }
         else
         {
-            foreach (var root in tb.Analyses)
-            {
-                if (referencedAsInner.Contains(root.Name)) continue; // not a root — runs via its outer
-
-                // Skip disabled OUTER sweeps to find the outermost thing that actually runs.
-                var top = AnalysisChain.ResolveEffectiveTop(root, tb);
-                if (top is null || !top.Enabled) continue;               // whole chain disabled
-                if (!AnalysisChain.IsChainRunnable(top, tb)) continue;   // base disabled → nothing runs
-
+            // Which chains run at all — a root nobody sweeps, resolved past disabled outer sweeps,
+            // whose base is enabled. AnalysisChain owns that rule, and the CLI's run verbs and the
+            // promotion above resolve the same list, so one card's run cannot land on a chain the
+            // Run button would not have dispatched.
+            foreach (var top in AnalysisChain.RunnableTops(tb))
                 PlanOne(top);
-            }
         }
 
         // Plans one already-resolved top — the shared body of the whole-list loop above and the
@@ -306,7 +318,8 @@ public static class SchematicRunService
             total += p.WorkUnits;
         }
 
-        return new RunPlan(RunStatus.Success, $"{planned.Count} analysis run(s) planned", lines, total)
+        return new RunPlan(RunStatus.Success, $"{planned.Count} analysis run(s) planned",
+                           lines, total, notes)
         {
             Lib = lib, Tb = tb, Nl = nl, BaseDirectory = baseDirectory, Analyses = planned,
         };

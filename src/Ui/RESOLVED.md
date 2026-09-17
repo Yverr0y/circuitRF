@@ -1,5 +1,44 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## "Run This Analysis" dropped the sweeps wrapping the card (2026-09-16)
+
+Owner: the Analyses panel's card menu ▸ "Run This Analysis" did not run the enabled parametric
+sweeps belonging to that simulation. Right-clicking an HB/DC/S-param card ran the bare analysis; the
+sweep cards above it in the chain were ignored.
+
+**It was doing that deliberately, and the rule was wrong.** `SchematicRunService.Prepare`'s
+`onlyAnalysisName` branch planned the named analysis as its own top — "a sweep wrapping it is not
+run" was written into the doc comment and pinned by two tests. The CLI had never agreed: `-a HB1`
+has always been PROMOTED to the sweep that wraps it, because a chain dispatched at its inner
+analysis drops the sweep axis and still returns a converged, complete-looking result. A freq-swept
+loadpull run at one frequency is indistinguishable on screen from the one that was asked for, which
+is why the sweep cannot be silently left out — and why the two surfaces must not disagree about
+what one card means.
+
+**Fix:** the promotion rule moved into `AnalysisChain` (`src/Core/Design`) as `RunnableTops`,
+`ChainContains`, `PromoteToRunnableTop` and `PromotionNote`, and both surfaces call it —
+`SchematicRunService.Prepare` for the panel's menu item, `ChainSelector.Select` for the run verbs'
+`-a`. The CLI's stderr wording is unchanged (its own gate asserts it byte for byte); `ChainSelector`
+now forwards to the shared sentence rather than holding a second copy of it. Naming any card of a
+chain — base, middle sweep, or root — now runs the same thing.
+
+**The narrowing is still a narrowing:** other chains declared in the same schematic do not run. That
+is the whole of what the menu item does that the Run button does not, so it is its own test.
+
+Three behaviours deliberately kept:
+- A DISABLED card is still refused by name rather than promoted past. The checkbox means a card does
+  not run; a menu item that overrode it would make the checkbox mean nothing.
+- A disabled OUTER sweep still collapses — promotion lands on the outermost sweep that is actually
+  enabled, exactly as the Run button's own resolution does.
+- A name that no longer resolves is still reported, never widened to a full run.
+
+**The promotion is reported**, as a new `RunPlan.Notes` list printed above the plan lines (and into
+the crash-report trail): the run is about to do more than the card that was right-clicked says, and
+a 12-point sweep starting from a click on a 2-point S-param card is otherwise unexplained. `Notes` is
+separate from `Lines` because that list is one entry per dispatched analysis and callers count it.
+
+Gate: `tests/Ui.Tests/RunOneAnalysisTests.cs`.
+
 ## The Relaunch button showed the text I-beam on hover (2026-09-16)
 
 Owner, on macOS: hovering the Messages panel's Relaunch button — the one offered after an auto-update

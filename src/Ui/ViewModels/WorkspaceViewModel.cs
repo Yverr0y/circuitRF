@@ -3608,11 +3608,17 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             return;
         }
 
+        // The promotion sentence FIRST, because it explains why the lines below it describe more than
+        // the one card that was right-clicked.
+        foreach (var note in plan.Notes)
+            Messages.Info(note);
         foreach (var line in plan.Lines)
             Messages.Info(line);
 
         Diagnostics.CrashReporter.Note(
             $"run: '{runLabel}' planned — {plan.Analyses.Count} analysis, {plan.TotalWorkUnits} work unit(s)");
+        foreach (var note in plan.Notes)
+            Diagnostics.CrashReporter.Note($"run:   {note}");
         foreach (var line in plan.Lines)
             Diagnostics.CrashReporter.Note($"run:   {line}");
 
@@ -3870,8 +3876,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
     /// <summary>
     /// The Analyses panel's card menu ▸ "Run This Analysis". Identical to the panel's Run in every
-    /// respect but one — the plan is narrowed to the named card — so the netlist, the corners, the
-    /// results file and the Data Display refresh are all the ordinary ones.
+    /// respect but one — the plan is narrowed to the named card's CHAIN, sweeps and all — so the
+    /// netlist, the corners, the results file and the Data Display refresh are all the ordinary ones.
     /// </summary>
     private void OnAnalysesRunOneRequested(Core.Design.Analysis analysis)
     {

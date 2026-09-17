@@ -99,7 +99,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
     public event Action? RunRequested;
 
     /// <summary>Raised by a card's "Run This Analysis"; WorkspaceViewModel runs the retained schematic
-    /// with the run narrowed to this one analysis.</summary>
+    /// with the run narrowed to this analysis's chain.</summary>
     public event Action<Analysis>? RunOneRequested;
 
     // ── Every edit this panel makes ──────────────────────────────────────────
@@ -140,9 +140,11 @@ public sealed partial class AnalysesListViewModel : ObservableObject
     private void RunAll() => RunRequested?.Invoke();
 
     /// <summary>
-    /// Card menu ▸ "Run This Analysis" — only this card runs. On a parametric sweep that means the
-    /// sweep and everything it wraps, and NOT the sweeps wrapping it; on a base analysis it means the
-    /// bare analysis, with no sweep axis at all.
+    /// Card menu ▸ "Run This Analysis" — only this card's CHAIN runs, and the other chains in the
+    /// schematic do not. The chain is the whole of it: every enabled parametric sweep wrapping the
+    /// card runs too, whichever card of the chain was pointed at. Dispatching the bare card instead
+    /// would drop those sweep axes and still produce a converged, complete-looking result — a
+    /// one-frequency loadpull is indistinguishable on screen from the swept one that was asked for.
     /// </summary>
     [RelayCommand]
     private void RunThis(AnalysisRowViewModel? row)
