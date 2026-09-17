@@ -28296,3 +28296,54 @@ panel** — that is exactly the defect, so `AnalysesPanelUndoTests.EveryPanelEdi
 states it over the whole surface rather than over one command.
 
 Gate: `tests/Ui.Tests/AnalysesPanelUndoTests.cs`.
+
+## A dragged component carried a rotation a clicked one did not (2026-09-17)
+
+Owner-reported: the same Library tile landed at different angles depending on how it was placed.
+Arming the place tool always starts unrotated — `PlacementService` arms every entry at `R0`, and
+`SchematicViewModel.BeginPlacement` sets `R0` outright — but all four drag-and-drop sites in
+`SchematicCanvas` (palette drag-over ghost, palette drop, cell drag-over ghost, cell drop) read
+`SchematicViewModel.CurrentPlacementRotation`, which is the STICKY angle left behind by the last
+`R`/`Ctrl+R` pressed while something was armed and nothing selected. It survives the placement that
+used it and survives disarming, so a drag minutes later inherited it.
+
+Both halves are now `SchematicCanvas.DropRotation`, a `const SymbolRotation.R0` — ghost and commit
+from one constant, so a drag cannot preview one angle and place another. The project-tree cell drag
+took the fix too: it is the same line of code and the same surprise, and leaving it would only have
+moved the inconsistency.
+
+**Why it can't just be "honour the user's rotation".** A drag has no rotation gesture — the keyboard
+does not route during a DnD operation — so there is no way to set the angle the drop uses, nor any
+on-screen statement of what it currently is. The value could only ever arrive from an unrelated
+earlier edit. `CurrentPlacementRotation` remains, and remains correct, for the ARMED path it belongs
+to.
+
+Gate: `tests/Ui.Tests/DropPlacesUnrotatedTests.cs` — a comment- and literal-stripped source scan
+(a `UserControl` cannot be constructed headlessly here, so no real `DropEvent` can be raised),
+holding shut the rule that the canvas's DnD path asks for no placement rotation at all.
+
+### Why `R` cannot rotate mid-drag, and what to do instead
+
+Asked at the same time, and decided against building: rotating with `R` *during* a drag out of the
+Library palette. **The OS drag loop owns the keyboard and Avalonia surfaces none of it.** Once
+`DragDrop.DoDragDropAsync` starts, the gesture belongs to the platform — macOS
+`beginDraggingSessionWithItems:event:source:` (the symbol is right there in
+`libAvaloniaNative.dylib`), Windows OLE `DoDragDrop`, X11 XDND. The ONLY keyboard member on either
+`DragEventArgs` or `RawDragEvent` is `KeyModifiers` (checked by reflection against the 12.0.3
+assembly, not recalled), and the macOS backend fills it by sampling
+`[[NSApp currentEvent] modifierFlags]` at each drag tick. **There is no key event in that path**, so
+a letter key cannot arrive however it is hooked. Modifier STATE is live and usable; a discrete
+keystroke is not.
+
+**What already works:** `CommitPlacement` ends with `SelectPlacedPart`, and every drop handler takes
+keyboard focus (see the entry above it). A dropped part therefore lands selected on a focused canvas,
+so `R` immediately after the release rotates it — in place, about its own origin, so it does not
+move. One keystroke, the same key as everywhere else.
+
+**Two alternatives were costed and declined.** A modifier tap (Shift steps the ghost 90°) is cheap
+and cross-platform but introduces a second rotation vocabulary, and it only samples when a drag
+update arrives — with the mouse still, the tap can go unseen. Replacing the palette's native DnD with
+an in-app drag is the only way `R` itself works, and it breaks dragging onto a document torn off into
+its own window: `MouseDevice` takes an IMPLICIT pointer capture on press
+(`_pointer.Capture(source, CaptureSource.Implicit)`), and a captured pointer does not cross OS
+windows. The OS drag image goes with it.

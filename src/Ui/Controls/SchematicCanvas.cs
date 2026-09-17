@@ -900,6 +900,18 @@ public sealed class SchematicCanvas : Control
 
     // ── Palette DnD drop target ───────────────────────────────────────────────
 
+    /// <summary>
+    /// The rotation every DRAG-AND-DROP placement lands with, ghost and commit alike.
+    ///
+    /// <para>Unrotated, always — never the schematic's last-used placement rotation. Arming a
+    /// placement from the palette starts at R0 (<c>PlacementService</c> arms every entry that way),
+    /// so honouring the sticky rotation here made the same tile place differently depending on
+    /// whether it was clicked or dragged, with nothing on screen to explain the difference. A drag
+    /// also has no way to rotate mid-gesture — the keyboard does not route during a drag — so the
+    /// carried-over angle could only ever be a surprise from an earlier edit.</para>
+    /// </summary>
+    private const SymbolRotation DropRotation = SymbolRotation.R0;
+
     private void OnPaletteDragOver(object? sender, DragEventArgs e)
     {
         // Accept only text drops whose content parses as our palette payload (prefix-guarded).
@@ -934,7 +946,7 @@ public sealed class SchematicCanvas : Control
 
             _editContext.Overlay = _editContext.Overlay with
             {
-                Ghost = new PlacementGhost(sx, sy, p.Kind, _editContext.CurrentPlacementRotation, false,
+                Ghost = new PlacementGhost(sx, sy, p.Kind, DropRotation, false,
                                            p.PortCount, ghostPrims, ghostPins),
             };
             InvalidateVisual();
@@ -982,7 +994,7 @@ public sealed class SchematicCanvas : Control
         var pos      = e.GetPosition(this);
         double wx    = ScreenToWorldX(pos.X);
         double wy    = ScreenToWorldY(pos.Y);
-        var rotation = _editContext.CurrentPlacementRotation;
+        var rotation = DropRotation;
 
         // A kit part places as the cell its symbol was installed into — the SAME path the
         // click-to-arm gesture takes, so dragging and clicking a tile can never disagree.
@@ -1025,7 +1037,7 @@ public sealed class SchematicCanvas : Control
             var pos      = e.GetPosition(this);
             double sx    = _editContext.EditModel.SnapToGrid(ScreenToWorldX(pos.X));
             double sy    = _editContext.EditModel.SnapToGrid(ScreenToWorldY(pos.Y));
-            var rotation = _editContext.CurrentPlacementRotation;
+            var rotation = DropRotation;
 
             PlacementGhost ghost;
             var schDir = _editContext.EditModel.SchematicDirectory;
@@ -1076,7 +1088,7 @@ public sealed class SchematicCanvas : Control
         var pos      = e.GetPosition(this);
         double wx    = ScreenToWorldX(pos.X);
         double wy    = ScreenToWorldY(pos.Y);
-        var rotation = _editContext.CurrentPlacementRotation;
+        var rotation = DropRotation;
 
         await _editContext.CommitCellPlacementAsync(payload.CellAbsPath, wx, wy, rotation);
         // Again after the await: placing a cell with no symbol yet asks whether to generate one, and

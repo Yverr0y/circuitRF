@@ -3299,7 +3299,11 @@ public sealed partial class SchematicViewModel : ObservableObject
 
     // ── Place tool ────────────────────────────────────────────────────────────
 
-    /// <summary>Last-used placement rotation — read by the drop target to honour the user's rotation.</summary>
+    /// <summary>
+    /// The ARMED placement's rotation — what R/Ctrl+R turn while the place tool is armed and nothing
+    /// is selected. Drag-and-drop does not read this: a drop is always unrotated
+    /// (<c>SchematicCanvas.DropRotation</c>), so a dragged tile and a clicked tile agree.
+    /// </summary>
     public SymbolRotation CurrentPlacementRotation => _placementRot;
 
     /// <summary>
