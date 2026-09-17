@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 using CircuitRF.Ui;
 using CircuitRF.Ui.Messages;
 using CircuitRF.Ui.Updates;
@@ -480,5 +482,69 @@ public sealed class RelaunchTests : IDisposable
                                       "Do it", null).HasAction);
         Assert.False(new MessageEntry(MessageLevel.Info, "x", null, DateTime.Now,
                                       "", () => Task.CompletedTask).HasAction);
+    }
+
+    /// <summary>
+    /// Owner report, 2026-09-16 (macOS): hovering the Relaunch button showed the text I-BEAM, not the
+    /// arrow.
+    ///
+    /// <para>The cause is not macOS and not the Button. Avalonia's <c>Cursor</c> property INHERITS
+    /// down the visual tree, and this button is hosted in an <c>InlineUIContainer</c> inside the
+    /// row's <c>SelectableTextBlock</c>, which sets the I-beam so its text can be selected — so with
+    /// no cursor of its own the button reads as text to the pointer, on every platform. The fix is
+    /// the button STATING <c>Cursor="Arrow"</c>, exactly as the file-path link beside it states
+    /// <c>Hand</c>; <c>StandardCursorType.Arrow</c> is what each backend maps to its own default
+    /// pointer, so one declaration covers macOS, Windows and Linux.</para>
+    ///
+    /// <para>Scanned rather than rendered because this project has no headless Avalonia: what can be
+    /// checked without a display is that the declaration is there and on the button itself, since
+    /// inheritance means putting it anywhere else would not reach it.</para>
+    /// </summary>
+    [Fact]
+    public void TheActionButton_DeclaresTheArrowCursor_RatherThanInheritingTheRowsIBeam()
+    {
+        string xaml = StripXamlComments(ReadRepoFile("src/Ui/Views/Messages/MessagesView.axaml"));
+
+        int start = xaml.IndexOf("<Button Content=\"{Binding ActionLabel}\"", StringComparison.Ordinal);
+        Assert.True(start >= 0, "The Messages row's action button was not found in MessagesView.axaml.");
+
+        int end = xaml.IndexOf("/>", start, StringComparison.Ordinal);
+        Assert.True(end > start, "The action button's element was not closed.");
+
+        string button = xaml[start..end];
+        Assert.Contains("Cursor=\"Arrow\"", button);
+    }
+
+    private static string RepoRoot([CallerFilePath] string here = "")
+    {
+        string? dir = Path.GetDirectoryName(here);
+        while (dir is not null && !File.Exists(Path.Combine(dir, "CLAUDE.md")))
+            dir = Path.GetDirectoryName(dir);
+        Assert.True(dir is not null, "Could not locate the repo root walking up from this test file.");
+        return dir!;
+    }
+
+    private static string ReadRepoFile(string relative)
+        => File.ReadAllText(Path.Combine(RepoRoot(), relative.Replace('/', Path.DirectorySeparatorChar)));
+
+    /// <summary>
+    /// A comment ABOUT the declaration would pass a scan that the markup itself failed — the trap H8's
+    /// own source-scan gate recorded, in XAML's comment syntax.
+    /// </summary>
+    private static string StripXamlComments(string xaml)
+    {
+        var sb = new System.Text.StringBuilder(xaml.Length);
+        for (int i = 0; i < xaml.Length; i++)
+        {
+            if (string.CompareOrdinal(xaml, i, "<!--", 0, 4) == 0)
+            {
+                int close = xaml.IndexOf("-->", i + 4, StringComparison.Ordinal);
+                if (close < 0) break;
+                i = close + 2;
+                continue;
+            }
+            sb.Append(xaml[i]);
+        }
+        return sb.ToString();
     }
 }

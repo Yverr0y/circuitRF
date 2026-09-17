@@ -1,5 +1,34 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## The Relaunch button showed the text I-beam on hover (2026-09-16)
+
+Owner, on macOS: hovering the Messages panel's Relaunch button — the one offered after an auto-update
+— gave the text-cursor glyph instead of the arrow.
+
+**Not a macOS fault, and not the Button's.** `Cursor` is an INHERITED Avalonia property, and the
+action button is hosted in an `InlineUIContainer` inside the message row's `SelectableTextBlock`
+(`Views/Messages/MessagesView.axaml`) — the same host the progress bar and the counter use. That
+`SelectableTextBlock` carries the I-beam so its text can be selected, and with no cursor of its own
+the button inherited it. Nothing is platform-specific here: every backend would have shown its own
+text cursor, so the report is the macOS spelling of a bug all three had.
+
+**Fix:** the button states `Cursor="Arrow"`, exactly as the file-path link two elements below it
+already states `Cursor="Hand"` — and for the same reason, which is why that link never had the
+problem. `StandardCursorType.Arrow` is what each backend maps to its own default pointer, so the one
+declaration covers macOS, Windows and Linux. Setting it on the row instead would not work: the
+`SelectableTextBlock` needs the I-beam over its own text, and inheritance would carry whatever it
+said straight back down to the button.
+
+**The general trap, for anything else hosted inline in a message row:** an interactive control placed
+in one of these `InlineUIContainer`s inherits the row's text cursor unless it says otherwise. The
+progress bar is the one remaining case, left alone because a bar is not something you press and no
+one has reported it.
+
+Gate: `tests/Ui.Tests/Updates/RelaunchTests.cs`'s
+`TheActionButton_DeclaresTheArrowCursor_RatherThanInheritingTheRowsIBeam` — a scan, because this
+project has no headless Avalonia; it strips XAML comments first and looks inside the button's own
+element, since inheritance means a declaration anywhere else would not reach it.
+
 ## A series probe could not break into a DOUBLED wire run, and nothing said so (2026-09-16)
 
 Owner: dropping a WSProbe onto a wire does not break into it the way an IProbe does.

@@ -175,7 +175,16 @@
 
                                  Absent, not disabled, on every row with no action — so an ordinary
                                  message keeps exactly the row height it has always had, and only
-                                 the one row carrying an action is taller. -->
+                                 the one row carrying an action is taller.
+
+                                 Cursor="Arrow" is NOT redundant (owner report, 2026-09-16: hovering
+                                 Relaunch showed the text I-beam). Avalonia's Cursor property
+                                 INHERITS down the visual tree, and this Button is hosted inside the
+                                 row's SelectableTextBlock, which sets the I-beam for text selection
+                                 — so without an explicit cursor the button reads as text to the
+                                 pointer. Stating it here fixes every platform at once, because
+                                 StandardCursorType.Arrow is what each backend maps to its own
+                                 default pointer. Same reason the file-path link below states Hand. -->
                             <InlineUIContainer BaselineAlignment="Center">
                                 <Button Content="{Binding ActionLabel}"
                                         IsVisible="{Binding HasAction}"
@@ -184,6 +193,7 @@
                                         Margin="4,0,2,0"
                                         MinHeight="0"
                                         FontSize="11"
+                                        Cursor="Arrow"
                                         VerticalAlignment="Center"/>
                             </InlineUIContainer>
 
