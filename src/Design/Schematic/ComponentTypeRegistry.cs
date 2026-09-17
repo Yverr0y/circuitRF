@@ -422,12 +422,21 @@ public static class ComponentTypeRegistry
         // A model the USER supplies. Sits with the built-in devices because that is what a user is
         // looking for when they reach for it — a transistor circuitRF does not ship — and it needs
         // no kit, no manifest and nothing installed beyond the compiled model file itself.
+        //
+        // DataFiles is a FILTER keyword, added on the owner's request (2026-09-17), and it is
+        // SpiceModel's own arrangement read the other way round: that one is primarily a file
+        // reference and borrows Devices/Nonlinear, this one is primarily a device and borrows
+        // DataFiles. What is placed either way is a FILE the user already has, which is how a user
+        // browsing by artifact looks for it — and the two belong side by side there, since the
+        // choice between them is which compiled form the model came in. Primary stays Devices, so
+        // the tile still sorts and appears exactly once.
         [SymbolKind.VerilogA]      = new("VerilogA", "X",
             Category: ComponentCategory.Devices,
             SearchTerms: ["VerilogA", "Verilog-A", "OSDI", "compact model", "compiled", "custom",
-                          "transistor", "device", "nonlinear", "BSIM", "PSP", "HICUM", "external"],
+                          "transistor", "device", "nonlinear", "BSIM", "PSP", "HICUM", "external",
+                          "data file", "model file", "file"],
             IsCommon: false,
-            ExtraCategories: [ComponentCategory.Nonlinear]),
+            ExtraCategories: [ComponentCategory.Nonlinear, ComponentCategory.DataFiles]),
         [SymbolKind.Diode]         = new("Diode", "D",
             Category: ComponentCategory.Devices,
             SearchTerms: ["Diode", "D", "junction", "rectifier", "varactor", "schottky", "pn", "nonlinear"],

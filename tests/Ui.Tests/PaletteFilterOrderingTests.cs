@@ -207,6 +207,22 @@ public class PaletteFilterOrderingTests
     }
 
     [Fact]
+    public void VerilogA_ReachableFromDataFiles_ButKeepsDevicesAsItsPrimary()
+    {
+        // Owner request, 2026-09-17 — SpiceModel's arrangement above, read the other way round.
+        // Both components place a FILE the user already has, so both have to be findable under Data
+        // Files, where the choice between them is which compiled form the model arrived in. Devices
+        // stays VerilogA's primary (a user shopping for a transistor still looks there first) and
+        // the tile appears exactly once.
+        Assert.Contains(LibraryCatalog.ByCategory(ComponentCategory.DataFiles), i => i.Kind == SymbolKind.VerilogA);
+        Assert.Contains(LibraryCatalog.ByCategory(ComponentCategory.Devices),   i => i.Kind == SymbolKind.VerilogA);
+        Assert.Contains(LibraryCatalog.ByCategory(ComponentCategory.Nonlinear), i => i.Kind == SymbolKind.VerilogA);
+
+        var item = Assert.Single(LibraryCatalog.AllItems, i => i.Kind == SymbolKind.VerilogA);
+        Assert.Equal(ComponentCategory.Devices, item.Category);
+    }
+
+    [Fact]
     public void Nonlinear_AppearsInThePaletteToolsCategoryList()
     {
         var tool = new PaletteTool();
