@@ -4008,6 +4008,55 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         await Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Help ▸ Release Notes… — the last <see cref="Updates.ReleaseNotesFetcher.LatestCount"/>
+    /// published releases, fetched when the user asks rather than when a version changes.
+    ///
+    /// <para><b>Nothing is recorded as seen here.</b> The automatic showing is the running version's
+    /// notes once (<see cref="Updates.ReleaseNotesGate"/>); a user who opened this menu item on an
+    /// older build has not been shown those, and marking them read would be the one failure the gate
+    /// exists to prevent — notes that are never shown at all.</para>
+    ///
+    /// <para><b>It always opens</b>, whatever <c>AppPreferences.ShowReleaseNotes</c> says. That
+    /// preference governs the showing that happens BY ITSELF after an update; a user who turned that
+    /// off has said they do not want to be interrupted, not that they may never read the notes — so
+    /// this path consults neither it nor <c>ReleaseNotesGate.Resolve</c>, and the dialog it opens does
+    /// not offer the checkbox that would appear to be about the window in front of them.</para>
+    ///
+    /// <para><b>The update-host overrides bind this too.</b> An administrator who said this binary
+    /// does not talk to that host has said it about every outbound call, and a menu item that fetched
+    /// anyway would be the second code path <c>UpdatePolicy</c> forbids. The dialog then shows the
+    /// releases page instead, which is the whole answer when nothing can be downloaded.</para>
+    /// </summary>
+    [RelayCommand]
+    private async Task ShowReleaseNotes(Window? owner)
+    {
+        var resolved = ResolveOwner(owner);
+        if (resolved is null) return;
+
+        Updates.ReleaseNotesResult result;
+
+        if (!Updates.ReleaseNotesGate.NetworkPermitted)
+        {
+            result = Updates.ReleaseNotesFetcher.NotPermitted();
+        }
+        else
+        {
+            // The user asked, and the fetch takes as long as the network does — so the panel says
+            // what is happening rather than leaving the menu looking inert, exactly as Check for
+            // Updates… does.
+            Messages.Info($"Fetching the latest {Updates.UpdateApp.Name} release notes...");
+            result = await Updates.ReleaseNotesFetcher.FetchLatestAsync().ConfigureAwait(true);
+        }
+
+        // Modeless and owned, like the launch-time showing: it belongs over this window and follows
+        // it, and Activate() raises it above the application's other windows, which Show(owner) alone
+        // does not do.
+        var dialog = new Views.Dialogs.ReleaseNotesDialog(result, offerOptOut: false);
+        dialog.Show(resolved);
+        dialog.Activate();
+    }
+
     // ---- New Schematic (⇧⌘N / Ctrl+Shift+N) — scratch, no workspace needed --
 
     /// <summary>

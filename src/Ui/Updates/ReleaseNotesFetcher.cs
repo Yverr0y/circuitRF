@@ -17,6 +17,15 @@ public enum ReleaseNotesOutcome
 
     /// <summary>The feed could not be reached, or did not answer with a release list.</summary>
     Unavailable,
+
+    /// <summary>
+    /// This installation is not allowed to contact the update host at all, so nothing was fetched —
+    /// see <see cref="ReleaseNotesGate.NetworkPermitted"/>. Distinct from
+    /// <see cref="Unavailable"/> because nothing was tried: telling a user on an administered
+    /// machine that the repository may be unreachable from their network would send them to
+    /// diagnose a network that is working.
+    /// </summary>
+    Blocked,
 }
 
 /// <summary>
@@ -30,7 +39,11 @@ public sealed record ReleaseNoteSection(string Version, string Markdown);
 
 /// <summary>What the dialog was handed.</summary>
 /// <param name="Outcome">Which of the three forms to render.</param>
-/// <param name="Version">The version the notes were asked for — shown in every form.</param>
+/// <param name="Version">
+/// The version the notes were asked for — shown in every form. <b>Empty when no single version was
+/// asked about</b>, which is the Help menu's form: it asks for the last few releases whatever they
+/// are, so naming one of them in the heading would claim the dialog is about that one.
+/// </param>
 /// <param name="Sections">
 /// The running version's notes FIRST, then every skipped version's beneath it, newest to oldest.
 /// Empty unless <see cref="ReleaseNotesOutcome.Found"/>.
@@ -140,8 +153,41 @@ public static class ReleaseNotesFetcher
     /// <paramref name="version"/>'s notes alone — see <see cref="Select"/> for why that is the safe
     /// answer rather than "everything".
     /// </param>
-    public static async Task<ReleaseNotesResult> FetchAsync(string version, string? since = null,
+    public static Task<ReleaseNotesResult> FetchAsync(string version, string? since = null,
+                                                      CancellationToken ct = default)
+        => FetchCoreAsync(version, (releases, browse) => Select(releases, version, browse, since), ct);
+
+    /// <summary>
+    /// How many releases the <b>Help ▸ Release Notes…</b> form shows — the owner's number.
+    ///
+    /// <para>Smaller than <see cref="MaxSections"/> on purpose, and the two are not the same question.
+    /// That one caps a range the user did not choose (everything installed since they last read any);
+    /// this one is the fixed size of a list they asked for, so it does not grow with how long the
+    /// machine sat unused. The releases page has the rest, and the dialog names it.</para>
+    /// </summary>
+    public const int LatestCount = 5;
+
+    /// <summary>
+    /// The <b>Help menu's</b> fetch: the most recent <paramref name="count"/> published releases,
+    /// whatever versions they happen to be.
+    ///
+    /// <para><b>Not anchored to the running version</b>, unlike <see cref="FetchAsync"/>. That call
+    /// answers "what changed in the build you were just moved to" and must not describe an application
+    /// the user is not running; this one answers "what has been released lately", which the user asked
+    /// for explicitly and which is the only form that can say anything at all on a build whose own
+    /// release was never published.</para>
+    /// </summary>
+    public static Task<ReleaseNotesResult> FetchLatestAsync(int count = LatestCount,
                                                             CancellationToken ct = default)
+        => FetchCoreAsync("", (releases, browse) => SelectLatest(releases, browse, count), ct);
+
+    /// <summary>
+    /// The one network call, with the choosing half handed in. Never throws: every failure is an
+    /// <see cref="ReleaseNotesOutcome.Unavailable"/> result the dialog can render.
+    /// </summary>
+    private static async Task<ReleaseNotesResult> FetchCoreAsync(
+        string version, Func<IReadOnlyList<ReleaseInfo>, string, ReleaseNotesResult> select,
+        CancellationToken ct)
     {
         string feedUrl = UpdateScheduler.FeedUrl();
         string browse  = BrowseUrl(feedUrl);
@@ -152,7 +198,7 @@ public static class ReleaseNotesFetcher
             var feed = new GitHubReleasesFeed(http, Paged(feedUrl));
 
             IReadOnlyList<ReleaseInfo> releases = await feed.ListReleasesAsync(ct).ConfigureAwait(false);
-            return Select(releases, version, browse, since);
+            return select(releases, browse);
         }
         catch (Exception)
         {
@@ -161,6 +207,56 @@ public static class ReleaseNotesFetcher
             // here is where to look.
             return new ReleaseNotesResult(ReleaseNotesOutcome.Unavailable, version, [], browse);
         }
+    }
+
+    /// <summary>
+    /// What to render when this installation may not contact the update host at all — nothing was
+    /// fetched, and the link is the whole answer. The URL comes from the same derivation every other
+    /// form uses, so a re-pointed feed sends the user to the repository it actually names.
+    /// </summary>
+    public static ReleaseNotesResult NotPermitted()
+        => new(ReleaseNotesOutcome.Blocked, "", [], BrowseUrl(UpdateScheduler.FeedUrl()));
+
+    /// <summary>
+    /// The choosing half of <see cref="FetchLatestAsync"/>, with no network in it: the newest
+    /// <paramref name="count"/> published releases, newest first.
+    ///
+    /// <para><b>Sorted rather than trusted.</b> The feed's order is the host's business, and "the last
+    /// five" has to drop the OLDEST entries rather than whichever ones happened to arrive last.</para>
+    ///
+    /// <para><b>Drafts and empty bodies are skipped</b>, for the same reasons <see cref="Select"/>
+    /// skips them — a draft is visible only to its publisher, and a release with no body is not a set
+    /// of notes. <b>A prerelease is NOT skipped, on either channel</b>: the user asked for the last
+    /// five releases, and filtering by the running build's channel would hand back a shorter list with
+    /// nothing on screen to say why it was shorter.</para>
+    ///
+    /// <para>Nothing published at all is <see cref="ReleaseNotesOutcome.NotPublished"/> — the feed
+    /// answered, and the honest answer is that there is nothing to read yet plus the link.</para>
+    /// </summary>
+    public static ReleaseNotesResult SelectLatest(IReadOnlyList<ReleaseInfo> releases, string browseUrl,
+                                                  int count = LatestCount)
+    {
+        var published = new List<ReleaseInfo>();
+        foreach (ReleaseInfo r in releases)
+        {
+            if (r.IsDraft || string.IsNullOrWhiteSpace(r.Body)) continue;
+            published.Add(r);
+        }
+
+        if (published.Count == 0)
+            return new ReleaseNotesResult(ReleaseNotesOutcome.NotPublished, "", [], browseUrl);
+
+        published.Sort(static (a, b) => b.Version.CompareTo(a.Version));
+
+        int take = Math.Clamp(count, 1, MaxSections);
+        var sections = new List<ReleaseNoteSection>();
+        foreach (ReleaseInfo r in published)
+        {
+            if (sections.Count >= take) break;
+            sections.Add(new ReleaseNoteSection(r.VersionText, r.Body));
+        }
+
+        return new ReleaseNotesResult(ReleaseNotesOutcome.Found, "", sections, browseUrl);
     }
 
     /// <summary>

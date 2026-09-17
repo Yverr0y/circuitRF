@@ -867,6 +867,91 @@ public class ReleaseNotesWiringTests
         Assert.DoesNotContain("ListBox", xaml);
     }
 
+    /// <summary>
+    /// Help ▸ Release Notes… exists on BOTH menu surfaces — the in-window one and the macOS native
+    /// one — directly below the documentation item, and both reach the same command with the window
+    /// to open over. The two surfaces are separate markup, so an item added to one of them is simply
+    /// absent on the other platform with nothing anywhere to say so.
+    /// </summary>
+    [Theory]
+    [InlineData("circuitRF Documentation")]   // native menu bar (macOS)
+    [InlineData("circuitRF _Documentation")]  // in-window menu
+    public void ReleaseNotesIsOnBothHelpMenus_DirectlyBelowDocumentation(string documentation)
+    {
+        string xaml = StripXmlComments(Read("src", "Ui", "Views", "WorkspaceWindow.axaml"));
+
+        int doc = xaml.IndexOf($"Header=\"{documentation}\"", StringComparison.Ordinal);
+        Assert.True(doc >= 0, $"The Help menu no longer carries \"{documentation}\".");
+
+        int notes = xaml.IndexOf("ShowReleaseNotesCommand", doc, StringComparison.Ordinal);
+        Assert.True(notes >= 0, $"No Release Notes item below \"{documentation}\".");
+
+        // DIRECTLY below: nothing else declares a header between the documentation item and the
+        // element the command is on — which starts at the last '<' before it.
+        int element = xaml.LastIndexOf('<', notes);
+        string between = xaml[(doc + $"Header=\"{documentation}\"".Length)..element];
+        Assert.DoesNotContain("Header=", between);
+        Assert.Contains("Release Notes", xaml[element..notes]);
+
+        // The command opens a dialog, so it is handed the window to open over — without the
+        // parameter it has no owner and has to guess one.
+        Assert.Contains("CommandParameter=\"{Binding $parent[Window]}\"",
+                        xaml[notes..Math.Min(xaml.Length, notes + 400)]);
+    }
+
+    /// <summary>
+    /// Help ▸ Release Notes… opens <b>whatever the preference says</b> and offers no opt-out of its
+    /// own. The preference governs the showing that happens by itself after an update; consulting it
+    /// here would leave a user who turned that off with a menu item that silently did nothing, and a
+    /// checkbox here would appear to be about the window in front of them while turning off a
+    /// different showing entirely.
+    /// </summary>
+    [Fact]
+    public void TheRequestedShowing_IgnoresThePreferenceAndOffersNoOptOut()
+    {
+        string body = MethodBody(UpdateInstallSiteTests.StripComments(
+                                     Read("src", "Ui", "ViewModels", "WorkspaceViewModel.cs")),
+                                 "private async Task ShowReleaseNotes(Window? owner)");
+
+        // Nothing that could make the menu item conditional on what the user set.
+        Assert.DoesNotContain("ShowPreference", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Resolve()", body, StringComparison.Ordinal);
+
+        // ...and nothing that consumes the automatic showing of the running version's own notes.
+        Assert.DoesNotContain("MarkShown", body, StringComparison.Ordinal);
+
+        // The one gate that does bind it: an administered installation contacts no host.
+        Assert.Contains("NetworkPermitted", body, StringComparison.Ordinal);
+
+        // The dialog is asked to leave the checkbox out, and it is the FLAG that decides — not the
+        // outcome, and not the preference.
+        Assert.Contains("offerOptOut: false", body, StringComparison.Ordinal);
+        Assert.Contains("AlwaysShowCheck.IsVisible = offerOptOut",
+                        UpdateInstallSiteTests.StripComments(
+                            Read("src", "Ui", "Views", "Dialogs", "ReleaseNotesDialog.axaml.cs")),
+                        StringComparison.Ordinal);
+    }
+
+    /// <summary>One method's text, from its signature to its matching closing brace.</summary>
+    private static string MethodBody(string code, string signature)
+    {
+        int at = code.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(at >= 0, $"{signature} is gone — this test is about what it does.");
+
+        int open = code.IndexOf('{', at + signature.Length);
+        Assert.True(open >= 0);
+
+        int depth = 0;
+        for (int i = open; i < code.Length; i++)
+        {
+            if (code[i] == '{') depth++;
+            else if (code[i] == '}' && --depth == 0) return code[at..(i + 1)];
+        }
+
+        Assert.Fail($"Unbalanced braces after {signature}.");
+        return "";
+    }
+
     private static string StripXmlComments(string xaml)
     {
         var sb = new System.Text.StringBuilder(xaml.Length);
@@ -882,5 +967,75 @@ public class ReleaseNotesWiringTests
             i = close + 3;
         }
         return sb.ToString();
+    }
+}
+
+/// <summary>
+/// <b>Help ▸ Release Notes…</b> — the last few published releases, which is a different question from
+/// the launch-time one. That form is anchored to the version the user was just moved to; this one is
+/// anchored to nothing, because the user asked what has been released lately.
+/// </summary>
+public class ReleaseNotesLatestTests
+{
+    private const string Browse = "https://github.com/x/y/releases";
+
+    private static ReleaseInfo Release(string tag, string body, bool draft = false)
+    {
+        Assert.True(SemanticVersion.TryParse(tag, out SemanticVersion? v));
+        return new ReleaseInfo(tag, v!, v!.IsPreRelease, draft, [], body);
+    }
+
+    /// <summary>
+    /// Five, newest first, and SORTED rather than trusted — the feed's order is the host's business,
+    /// and "the last five" has to drop the oldest entries rather than whichever ones happened to
+    /// arrive last. A prerelease counts as a release here whatever the running build is: the user
+    /// asked for the last five, and a channel filter would hand back a shorter list with nothing on
+    /// screen to say why.
+    /// </summary>
+    [Fact]
+    public void TheLastFive_NewestFirst_WhateverOrderTheFeedIsIn()
+    {
+        ReleaseInfo[] feed =
+        [
+            Release("v1.0.0-beta.2", "b2"),
+            Release("v1.1.0",        "one one"),
+            Release("v0.9.0",        "old"),
+            Release("v1.0.0",        "one oh"),
+            Release("v1.0.0-beta.3", "b3"),
+            Release("v0.8.0",        "older"),
+            Release("v1.2.0",        "one two"),
+        ];
+
+        ReleaseNotesResult r = ReleaseNotesFetcher.SelectLatest(feed, Browse);
+
+        Assert.Equal(ReleaseNotesOutcome.Found, r.Outcome);
+        Assert.Equal(["1.2.0", "1.1.0", "1.0.0", "1.0.0-beta.3", "1.0.0-beta.2"],
+                     r.Sections.Select(x => x.Version).ToArray());
+
+        // ...and it names no version of its own, so the dialog's heading cannot claim the window is
+        // about one of the five.
+        Assert.Equal("", r.Version);
+    }
+
+    /// <summary>
+    /// A draft is visible only to its publisher and a release with no body is not a set of notes — so
+    /// a feed holding only those has published nothing, and the honest answer is the releases page.
+    /// </summary>
+    [Fact]
+    public void DraftsAndEmptyBodiesAreNotReleases()
+    {
+        ReleaseInfo[] feed =
+        [
+            Release("v2.0.0", "unpublished", draft: true),
+            Release("v1.9.0", "   "),
+            Release("v1.0.0", "real notes"),
+        ];
+
+        Assert.Equal(["1.0.0"],
+                     ReleaseNotesFetcher.SelectLatest(feed, Browse).Sections.Select(x => x.Version).ToArray());
+
+        ReleaseNotesResult none = ReleaseNotesFetcher.SelectLatest([feed[0], feed[1]], Browse);
+        Assert.Equal(ReleaseNotesOutcome.NotPublished, none.Outcome);
+        Assert.Equal(Browse, none.BrowseUrl);
     }
 }

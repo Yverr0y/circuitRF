@@ -10,9 +10,11 @@
         ShowInTaskbar="False">
 
   <!--
-    Shown once, the first time a newly installed version is launched. Never on a clean system, and
-    never twice for the same version — ReleaseNotesGate owns both of those and this window owns
-    neither.
+    Two ways in, one window. At launch it opens once, the first time a newly installed version is
+    run — never on a clean system and never twice for the same version, all of which ReleaseNotesGate
+    owns and this window owns none of. From Help ▸ Release Notes… it opens on request, with the last
+    few published releases whatever versions they are; there the heading names no single version, so
+    every section carries its own banner (see Render).
 
     The notes are ONE SelectableTextBlock, not a list of per-line controls: the owner's requirement is
     that a user can drag a selection across many lines and copy it in one go, and a selection cannot
@@ -50,7 +52,10 @@
     </Border>
 
     <!-- Bottom bar. The checkbox is at the LEFT, per the owner's own layout; it writes the preference
-         the moment it changes, so there is no OK/Cancel asymmetry to explain. -->
+         the moment it changes, so there is no OK/Cancel asymmetry to explain. It belongs to the
+         AUTOMATIC showing alone and the code-behind hides it on the Help ▸ Release Notes… form —
+         that one opens whatever the preference says, so a checkbox there would be about a different
+         showing than the window carrying it. -->
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,12,0,0">
 
       <CheckBox Grid.Column="0" Name="AlwaysShowCheck"

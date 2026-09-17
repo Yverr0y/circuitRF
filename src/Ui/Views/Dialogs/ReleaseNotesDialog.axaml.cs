@@ -12,7 +12,8 @@ using CircuitRF.Ui.Updates;
 namespace CircuitRF.Ui.Views.Dialogs;
 
 /// <summary>
-/// The <b>Release Notes</b> window — what changed in the version that has just been installed.
+/// The <b>Release Notes</b> window — what changed in the version that has just been installed, and,
+/// from Help ▸ Release Notes…, what has been released lately.
 ///
 /// <para>It renders a <see cref="ReleaseNotesResult"/> and does nothing else: it does not decide
 /// whether to open (<see cref="ReleaseNotesGate"/>), does not fetch (<see cref="ReleaseNotesFetcher"/>)
@@ -45,42 +46,91 @@ public partial class ReleaseNotesDialog : Window
         // Parameterless for the XAML previewer only; nothing in the application uses it.
     }
 
-    public ReleaseNotesDialog(ReleaseNotesResult result)
+    /// <param name="result">What to render.</param>
+    /// <param name="offerOptOut">
+    /// Whether to offer the "Always Show New Release Notes" checkbox — <b>true only for the automatic
+    /// showing</b>, which is the one thing that preference governs.
+    ///
+    /// <para>Help ▸ Release Notes… was asked for by hand, and it opens whatever the preference says
+    /// (<c>WorkspaceViewModel.ShowReleaseNotes</c>). A checkbox there would sit beneath a window the
+    /// user had just opened deliberately and appear to be about it, while actually turning off a
+    /// different showing they were not thinking about — and it would read as switched off to everyone
+    /// who has ever turned the automatic one off, on a dialog that is plainly showing. Settings ▸
+    /// Updates is where it lives for them.</para>
+    /// </param>
+    public ReleaseNotesDialog(ReleaseNotesResult result, bool offerOptOut = true)
     {
         InitializeComponent();
-        Render(result);
+        Render(result, offerOptOut);
     }
 
-    private void Render(ReleaseNotesResult result)
+    /// <summary>
+    /// Who these notes are about, for the heading and for every failure sentence.
+    ///
+    /// <para>A result with <b>no version</b> is the Help menu's form — the last few releases, whatever
+    /// they are — and naming one of them here would claim the window is about that one. It is not a
+    /// missing value to be papered over: see <see cref="ReleaseNotesResult.Version"/>.</para>
+    /// </summary>
+    private static string Subject(string version)
+        => version.Length > 0 ? $"{UpdateApp.Name} {version}" : $"{UpdateApp.Name} Release Notes";
+
+    private void Render(ReleaseNotesResult result, bool offerOptOut)
     {
         _browseUrl = result.BrowseUrl;
 
-        HeadingText.Text = $"{UpdateApp.Name} {result.Version}";
+        string subject = Subject(result.Version);
+        HeadingText.Text = subject;
 
-        _loading = true;
-        try { AlwaysShowCheck.IsChecked = ReleaseNotesGate.ShowPreference; }
-        finally { _loading = false; }
+        // Hidden rather than disabled, and the preference is not even read: on the requested form it
+        // is not a control the user may not use, it is a question this window is not asking.
+        AlwaysShowCheck.IsVisible = offerOptOut;
+
+        if (offerOptOut)
+        {
+            _loading = true;
+            try { AlwaysShowCheck.IsChecked = ReleaseNotesGate.ShowPreference; }
+            finally { _loading = false; }
+        }
 
         NotesText.Inlines?.Clear();
 
         switch (result.Outcome)
         {
             case ReleaseNotesOutcome.Found:
-                AppendSections(result.Sections);
+                // Banners on the version-less form even when it carried a single section: there, the
+                // heading does not name a version, so without one nothing on screen says which
+                // release is being read.
+                AppendSections(result.Sections, banners: result.Sections.Count > 1
+                                                         || result.Version.Length == 0);
                 break;
 
             case ReleaseNotesOutcome.NotPublished:
                 BrowseButton.IsVisible = true;
                 AppendFailure(
-                    $"No release notes have been published for {UpdateApp.Name} {result.Version}.",
+                    result.Version.Length > 0
+                        ? $"No release notes have been published for {subject}."
+                        : $"No {UpdateApp.Name} release notes have been published yet.",
+                    result.BrowseUrl);
+                break;
+
+            case ReleaseNotesOutcome.Blocked:
+                // Nothing was tried, so it does not say the repository could not be reached — on an
+                // administered machine that would send the user to diagnose a working network.
+                BrowseButton.IsVisible = true;
+                AppendFailure(
+                    $"{UpdateApp.Name} on this machine is configured not to contact the update host, "
+                    + "so the release notes were not downloaded.",
                     result.BrowseUrl);
                 break;
 
             default:
                 BrowseButton.IsVisible = true;
                 AppendFailure(
-                    $"The release notes for {UpdateApp.Name} {result.Version} could not be downloaded. "
-                    + "The repository may be unreachable from this network.",
+                    result.Version.Length > 0
+                        ? $"The release notes for {subject} could not be downloaded. "
+                          + "The repository may be unreachable from this network."
+                        : $"The {UpdateApp.Name} release notes could not be downloaded. "
+                          + "The repository may be unreachable from this network.",
                     result.BrowseUrl);
                 break;
         }
@@ -92,17 +142,16 @@ public partial class ReleaseNotesDialog : Window
     /// stacked as one control per release: a selection cannot cross two controls, and the owner's
     /// requirement is that the whole thing drags and copies in one go.
     ///
-    /// <para><b>The version banner appears only when there is more than one section.</b> With a single
-    /// release it would restate the window heading immediately beneath itself; with several it is the
-    /// only thing separating one release's notes from the next, since a body's own headings render at
-    /// the same weight whichever release they came from.</para>
+    /// <para><b>The version banner is the caller's decision</b> (<see cref="Render"/>). With a single
+    /// release under a heading that already names it, a banner would restate that heading immediately
+    /// beneath itself; with several it is the only thing separating one release's notes from the next,
+    /// since a body's own headings render at the same weight whichever release they came from — and on
+    /// the Help menu's form the heading names no version at all, so it is needed even for one.</para>
     /// </summary>
-    private void AppendSections(IReadOnlyList<ReleaseNoteSection> sections)
+    private void AppendSections(IReadOnlyList<ReleaseNoteSection> sections, bool banners)
     {
         InlineCollection? inlines = NotesText.Inlines;
         if (inlines is null) return;
-
-        bool banners = sections.Count > 1;
 
         for (int i = 0; i < sections.Count; i++)
         {

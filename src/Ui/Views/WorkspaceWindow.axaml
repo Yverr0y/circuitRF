@@ -251,6 +251,10 @@
                 <NativeMenuItem.Menu>
                     <NativeMenu>
                         <NativeMenuItem Header="circuitRF Documentation" Command="{Binding OpenDocumentationCommand}"/>
+                        <!-- The last few published releases, fetched when asked. The launch-time
+                             showing of the running version's notes is a different thing and is not
+                             reachable from a menu. -->
+                        <NativeMenuItem Header="Release Notes…" Command="{Binding ShowReleaseNotesCommand}" CommandParameter="{Binding $parent[Window]}"/>
                         <NativeMenuItemSeparator/>
                         <NativeMenuItem Header="Crash Reports…" Command="{Binding OpenCrashReportsCommand}"/>
                         <NativeMenuItemSeparator/>
@@ -866,6 +870,11 @@
                 <MenuItem Header="circuitRF _Documentation"
                           Command="{Binding OpenDocumentationCommand}">
                     <MenuItem.Icon><mi:MaterialIcon Kind="BookOpenVariant" Width="16" Height="16"/></MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Release Notes…"
+                          Command="{Binding ShowReleaseNotesCommand}"
+                          CommandParameter="{Binding $parent[Window]}">
+                    <MenuItem.Icon><mi:MaterialIcon Kind="TagOutline" Width="16" Height="16"/></MenuItem.Icon>
                 </MenuItem>
                 <MenuItem Header="_Crash Reports…"
                           Command="{Binding OpenCrashReportsCommand}">
