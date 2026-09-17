@@ -368,7 +368,16 @@ public sealed class Mim14DeembeddedFilmTests(ITestOutputHelper output)
         // Both were past the old floor of 40 and both are inside the new one. This is asserted on
         // the real artwork through the real verdict, not on a hand-built pair, because the thing
         // that was blocking a design is the combination of the two.
-        foreach (int across in new[] { 1, 2, 3, 4 })
+        //
+        // ONE CELL ACROSS IS DELIBERATELY NOT IN THIS LOOP. At one cell across the 40 um feed the
+        // straddling cell IS 40 um and the film IS 0.2 um, so cell/separation is 200 exactly — the
+        // bound itself, where the verdict's own > decides the answer on the last bit of a double
+        // rather than on anything measured. It happens to land inside today (199.99999999999517,
+        // because the two level z's are 103 um and 103.2 um and their difference is not exact), and
+        // a fixture whose verdict turns on that is a coin toss: MimThinLayerTests M9_2 moved its own
+        // rung OFF this ratio for the same reason. Table 5 in HISTORY.md §MIM-14 grades the rung;
+        // this test grades the three that are unambiguously inside.
+        foreach (int across in new[] { 2, 3, 4 })
         {
             var fx = Fixture.Build(0.2e-6, across);
             var v  = PlanarSolve.LevelSeparationVerdict(fx.Problem, fx.Mesh);
@@ -376,6 +385,9 @@ public sealed class Mim14DeembeddedFilmTests(ITestOutputHelper output)
                            $"{fx.CellOverSeparation:G4}, refused = {!v.Ok}");
             Assert.True(v.Ok, $"cell/separation {fx.CellOverSeparation:G4} is inside MIM-14's " +
                               $"own ladder and must not be refused: {v.Reason}");
+            Assert.True(fx.CellOverSeparation < PlanarLevels.FullWaveCellOverSeparation,
+                $"cell/separation {fx.CellOverSeparation:G4} is ON the bound, not inside it — this " +
+                "loop must not be the thing that decides a tie.");
         }
 
         // …and past it the refusal still stands, which is MIM-9's instruction and this brief's:

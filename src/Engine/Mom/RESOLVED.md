@@ -29,6 +29,12 @@ Each of the four things that made MIM-12a stop has a cause, and none of them is 
   both ends). Given cells between the planes it is an ordinary matched section: `|S₁₁|` in the line's
   own reference is 0.980 at two cells across, 0.133 at four and **0.0131 at eight**, against
   `PlanarDeembedTests` T4_1's own 3e-2 gate.
+  *One deviation from the brief's wording, stated rather than taken quietly:* it asks control 1 for
+  `σ_max ≤ 1` and the shipped fixture asserts `≤ 1.001`, because at 600 µm / 8 cells it reads
+  **1.00016**. Table 1 has the row that clears it outright — 900 µm at 8 cells reads 0.9992 — and the
+  fixture was not moved onto it, because 1.6e-4 is four decades below the 8 % that stopped MIM-12a
+  and the finding (it is the CELL COUNT between the reference planes, not the length) is the same
+  either way.
 - **…and the `|S₁₁|` that looks alarming in the PUBLISHED S is not a defect at all.** This line is
   67–83 Ω and the published S is renormalised to the port's 50 Ω, where a perfectly matched section
   legitimately reads 0.07–0.45. The imaginary part of `Z_c` is what does it: for a matched line the
@@ -134,7 +140,10 @@ unknowns) is not owed. The widened accelerated ceiling MIM-13 left open stays op
 - **The straddling cell takes its pitch from the NARROWEST metal on the two levels, not the widest.**
   At one cell across it is 40 µm — the feed's width — whether the plate is 60, 200 or 400 µm. This is
   the same shape as MIM-10 finding 3 (the shared tensor grid belongs to the whole run) and it is why
-  `MinCellsAcrossConductor` is not a remedy for being past the floor.
+  `MinCellsAcrossConductor` is not OFFERED as a remedy for being past the floor. It does move the
+  ratio the right way on this fixture — 1 → 2 → 4 is cell/separation 200 → 100 → 50 — so it is not an
+  inert knob and the refusal does not call it one; what disqualifies it is that it is GLOBAL, which is
+  exactly the gap the brief's Case B per-level override would have closed.
 
 ### 6. M5 — the acceptance is the structure that was refused, and it runs
 
@@ -198,9 +207,14 @@ hand-drawn copy of it is easy to get backwards.
 - **T2** (Benchmark) — the ladder at the three rungs that decide it: 67 (where the real design sits),
   80 and 200 (where MIM-12 read the sign inverted). Positive, within 10 % of the electrostatic value
   on the same mesh, passive, and the fitted L the same at all three.
-- **T3** (routine) — the constant is 200; one, two, three and four cells across a 60 µm plate on the
-  shipped film all run, where the old floor refused three of them; a 50 nm film at one cell across is
-  still refused and still names the ratio.
+- **T3** (routine) — the constant is 200; two, three and four cells across a 60 µm plate on the
+  shipped film all run, where the old floor refused every one of them; a 50 nm film at one cell across
+  is still refused and still names the ratio. **ONE cell across is deliberately not in that loop** and
+  for the same reason M9_3's fixture moved off it: at one cell across the straddling cell is the
+  40 µm feed and the film is 0.2 µm, so cell/separation is 200 to within an ulp — the bound itself,
+  where `>` decides on the last bit of a double rather than on anything measured. It lands inside
+  today (199.99999999999517, because 103.2 µm − 103 µm is not exact) and that is luck, not a claim.
+  Table 5 grades the rung; the test grades the three that are unambiguously inside.
 - **T4** (routine) — `Im(−Y₂₁)/ω` against `−1/(ω·Im(−1/Y₂₁))` on a branch of known Q, and the L-C fit
   against an exact series L-C. No EM in it; this is the arithmetic the two Benchmark tests rest on.
 

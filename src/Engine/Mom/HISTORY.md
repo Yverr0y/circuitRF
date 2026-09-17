@@ -9030,9 +9030,12 @@ fixture at the shipped 0.2 µm film:
 **Cells per wavelength is inert for a structural reason rather than a coincidental one: the mesh is
 BIT-IDENTICAL at all four.** On a plate small enough to sit this close to another level the pitch is
 `width/MinCellsAcrossConductor` at any usable λ setting. Min cells across conductor DOES act on the
-straddling cell — and it acts in the direction that makes the ratio smaller, so it is not a remedy for
-being past the floor either; on a real layout the whole run's shared tensor grid sets the plate's
-pitch rather than the plate does (MIM-10 finding 3).
+straddling cell, and in the HELPFUL direction — 1 → 2 → 4 is cell/separation 200 → 100 → 50 — so
+unlike Cells per wavelength it does not belong in an inert-knob list. What keeps it out of the
+refusal is that it is GLOBAL: on a real layout the whole run's shared tensor grid sets the plate's
+pitch rather than the plate does (MIM-10 finding 3), so raising it to resolve a 60 µm plate refines
+every track in the layout and the unknown count with it. Reaching it per LEVEL is the brief's Case B,
+not built because the floor landed at 200.
 
 **And the straddling cell takes its pitch from the NARROWEST metal on the two levels, not the widest**:
 at one cell across it is 40 µm — the feed's width — whether the plate is 60, 200 or 400 µm.

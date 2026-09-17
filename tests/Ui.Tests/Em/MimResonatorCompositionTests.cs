@@ -90,8 +90,11 @@ public sealed class MimResonatorCompositionTests(ITestOutputHelper output) : IDi
     /// <para><b>'MIM Metal' is deliberately NOT an analysis level.</b> With no plate level in the
     /// run, <c>PatternedDielectric</c> turns the film to air and the structure is ordinary
     /// Metal1/Metal2 interconnect two levels 6 µm apart — cell/separation of order 3, nowhere near
-    /// the 40 a de-embedded close-level pair is measured over. That is the whole reason this route
-    /// works while the all-EM one is refused.</para>
+    /// the bound a de-embedded close-level pair is measured over. That was the whole reason this
+    /// route existed while the all-EM one was refused; <b>since MIM-14 moved that bound from 40 to
+    /// 200 the all-EM run is no longer refused</b> (see
+    /// <c>MIM14_TheSpiralAndTheCapacitorArePREFLIGHTED_…</c> below), and this route is now the
+    /// cheap alternative to it rather than the only one.</para>
     /// </summary>
     private static EmSetup TheUsersSetup(string layoutRef, double startGHz, double stopGHz, int points)
         => new()

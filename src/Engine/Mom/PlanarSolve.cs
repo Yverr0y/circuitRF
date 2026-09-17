@@ -4972,10 +4972,15 @@ public static class PlanarSolve
     /// quoting MIM-12's numbers: Cells per wavelength 20 → 40 → 100 → 400 leaves the mesh
     /// BIT-IDENTICAL on a plate this small (94 cells, a 20 µm straddling cell, σ_max 0.99920 at all
     /// four), because that knob sets the pitch ALONG the current while the plate's own width sets it
-    /// across. Min cells across conductor DOES act on this quantity — 1 → 2 → 4 takes the straddling
-    /// cell 40 → 20 → 10 µm — but it acts in the direction that makes the ratio SMALLER, and on a
-    /// real layout it is the whole run's shared tensor grid that sets the plate's pitch rather than
-    /// the plate (MIM-10 finding 3).</para>
+    /// across. Min cells across conductor DOES act on this quantity, and in the HELPFUL direction —
+    /// 1 → 2 → 4 takes the straddling cell 40 → 20 → 10 µm, i.e. cell/separation 200 → 100 → 50 —
+    /// which is why the refusal does not list it among the inert knobs the way MIM-9's did. It is
+    /// still not offered as a remedy, for a reason about the LAYOUT rather than about the knob: it
+    /// is GLOBAL, and on a real layout the whole run's shared tensor grid sets the plate's pitch
+    /// rather than the plate does (MIM-10 finding 3), so taking it from 2 to 8 to resolve a 60 µm
+    /// plate also puts 1.25 µm cells on a 10 µm interconnect track and the unknown count with it.
+    /// A per-LEVEL override is what would make it reachable; that is MIM-14's Case B, scoped there
+    /// and deliberately not built because the floor landed at 200 and nothing needs it.</para>
     ///
     /// <para>Separate from <see cref="LevelSeparationNotes"/> so a caller can have the verdict
     /// without the prose and vice versa, which is what <c>EmRunService.Preflight</c> and

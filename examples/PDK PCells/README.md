@@ -152,11 +152,12 @@ goes wherever the winding ends, and nothing in the generator special-cases it. (
 `Parameter.real`, not `Parameter.integer` — an integer parameter refuses "3.5" in the Properties
 Inspector, correctly, which makes the declaration the bug.)
 
-**Pin 1 is at the end of the winding, and that is not a detail.** It used to be hung off the middle
-of the outermost side, which looked right and was not: metal continued from the lead in *both*
-directions — one way spiralling inward, the other running three-quarters of a lap to the winding's
-real free end and stopping dead. A ¾-lap open stub, in the same metal as the coil, with nothing in
-the picture to distinguish it. An inductor with one of those on it is a different part.
+**Pin 1 is at the end of the winding, and that is not a detail.** Hang the outer lead off the middle
+of the outermost side instead — which looks right — and metal continues from it in *both* directions:
+one way spiralling inward, the other running three-quarters of a lap to the winding's real free end
+and stopping dead. That is a ¾-lap open stub in the same metal as the coil, with nothing in the
+picture to distinguish it, and an inductor carrying one is a different part. Ending the lead at the
+winding's own free end is what avoids it.
 
 ### Drawn as rectangles, emitted as one region
 
@@ -208,8 +209,7 @@ to be simulated by a gate that must not need a generator process running, and th
 Its `.cem` names **three** analysis levels — `Metal1`, `MIM Metal`, `Metal2` — which is what puts the
 0.2 µm film in the matrix, and that is the only interesting thing about it. The run reports
 cell/separation 127 against the 200 the film is measured over, 2,456 unknowns against a dense ceiling
-of 5,000, and it is passive at every point. **Until 2026-09-16 this same file was refused before a
-matrix was filled**, because the bound then stood at 40.
+of 5,000, and it is passive at every point.
 
 Open `SpiralInductor` beside it for the cheap route; the two sections at the end of this page compare
 them.
@@ -352,49 +352,45 @@ allowed to: `tech.dbu_per_micron` is handed over for exactly that — a constant
 holds, with no other way of becoming a number. Length *parameters* are still converted by circuitRF
 and never here.
 
-### A full-wave run CAN read that capacitance back, since 2026-09-16 — and for a while it could not
+### A full-wave run reads that capacitance back, up to a bound on the mesh
 
-Worth saying in both halves, because the paragraph that used to stand here said the opposite and the
-recipe in the next section was written for it.
+**A 0.2 µm film is in reach of the EM engine, and `SpiralResonator` in this workspace is the proof:**
+this coil with a series `KIT_MIMCAP` on it, three analysis levels, solved all-EM and passive at every
+point.
 
-**The fill was right first, and was measured to be.** The electrostatic plate capacitance the
-cross-level matrix produces is within 1 % of ε₀εᵣA/d on this kit's own capacitor, and `KIT_MIMCAP`'s
-1.0838 pF is independently confirmed to 0.3 %. It was not always: until 2026-09-15 the cross-level
-fill integrated across a peak a hundredth of a cell wide instead of resolving it, and the same plate
-extracted as an OPEN with the wrong sign.
+**The bound is on the MESH against the film, not on the process.** What the engine asks is
+`cell/separation` — the largest cell straddling the two closest conductor levels, divided by how far
+apart they are. Inside **200** the de-embedded series element comes back within 10 % of the
+electrostatic mutual capacitance of the same mesh, and passive. Past 200 the run is **refused**,
+because nothing is measured there and the answer it would publish is a plausible wrong capacitance
+rather than an obvious failure. The run reports its own ratio by name, every time.
 
-**The DE-EMBEDDED two-port was the half that lagged, and it is fixed.** On one plate pair with only
-the film thickness moving, the extracted series element used to read 1.13 of ε₀εᵣA/d at
-cell/separation 20 and 1.05 at 40, then **−1.02 at 80 and −1.52 at 200** — a capacitor published as
-an inductor, in an answer that was complete, smooth, reciprocal and converged. That was a defect in
-the kernel's fit of the film's own reflections, not in the solve; it was repaired, and the same
-ladder now reads **within 10 % at every rung out to cell/separation 200**, passive throughout.
+Separately and more tightly, the ELECTROSTATIC plate capacitance the cross-level matrix produces is
+within 1 % of ε₀εᵣA/d on this kit's own capacitor, and `KIT_MIMCAP`'s reported 1.0838 pF is confirmed
+to 0.3 %. That is not the same statement as the one above — it has no port in it — and the run keeps
+the two apart.
 
-**So the bound is still there and it is five times wider.** A run whose closest two conductor levels
-are straddled by cells more than 200× their separation is still refused, because past that nothing
-has been measured — but `SpiralResonator` in this workspace, which is this coil with a series
-`KIT_MIMCAP` on it, meshes at **cell/separation 127 and runs all-EM.** The film's own numbers are in
-`src/Engine/Mom/HISTORY.md` §MIM-14 and the ladders before it.
+**The ratio belongs to the whole run, not to the part.** This kit's 60 µm capacitor in a fixture of
+its own is meshed at 3.7 µm across the plate; the SAME capacitor at the end of the spiral here is
+meshed at 25.4 µm, because the shared tensor grid is sized on a layout 500 µm across. So a refusal is
+never a statement about the process, and `Cells per wavelength` is not the knob that moves it — on a
+plate this small that knob leaves the mesh untouched, and the run says so rather than making you find
+out. What acts is the film's own thickness in the technology, or taking the upper level out of the EM
+run and modelling what it carries as a circuit element — which is the second recipe below.
 
-**What decides it is the mesh against the film, not the technology** — and the mesh belongs to the
-whole run, not to the part. This kit's 60 µm capacitor in a fixture of its own is meshed at 3.7 µm
-across the plate; the SAME capacitor at the end of the spiral here is meshed at 28 µm, because the
-shared tensor grid is sized on a layout 500 µm across. So neither a refusal nor a permission here is
-a statement about the process, and `Cells per wavelength` is not the knob that moves it — the run
-says which knobs it measured to be inert.
+## How to simulate an LC resonator — two ways
 
-## How to simulate an LC resonator — two ways, and the cheap one is still worth knowing
-
-`SpiralResonator` in this workspace is this coil with a series MIM capacitor on it, and it runs
-**all-EM**: three analysis levels, 2,456 unknowns, cell/separation 127 against the 200 the film is
-measured over, passive at every point. That is the direct answer and it needs nothing below.
+**The direct way is `SpiralResonator`:** this coil with a series MIM capacitor on it, run all-EM —
+three analysis levels, 2,456 unknowns, cell/separation 127 against the 200 the film is measured over,
+passive at every point. Open it and press Simulate; it needs nothing below.
 
 **The other way is to EM everything except the 0.2 µm gap and put the capacitance in the circuit
-beside the result.** It was the only way until 2026-09-16 and it is still what a MMIC designer does
-by habit: a MIM capacitor on a known process is `ε₀εᵣA/d` to a fraction of a per cent and nobody
-spends unknowns solving a parallel plate; what earns an EM run is the coil, the crossover, the ground
-return and the coupling, and every one of those is on Metal1 and Metal2 and is nowhere near the film.
-It is also much cheaper — two levels instead of three, and no plate to resolve.
+beside the result** — what a MMIC designer does by habit. A MIM capacitor on a known process is
+`ε₀εᵣA/d` to a fraction of a per cent and nobody spends unknowns solving a parallel plate; what earns
+an EM run is the coil, the crossover, the ground return and the coupling, and every one of those is
+on Metal1 and Metal2 and is nowhere near the film. It is also much cheaper — two levels instead of
+three, and no plate to resolve. Reach for it when the coil is what you are designing and the
+capacitor is a known part.
 
 The four steps, on this workspace's own spiral:
 
@@ -434,9 +430,9 @@ finer one, which is what you want of a number you are going to design against.
 2.4–3.0 GHz, three analysis levels, 2,456 unknowns, passive at every point): the |S11| null at
 **2.77 GHz, −31.6 dB**, with |S21| = −0.22 dB there. **0.9 % from the composed answer**, which is
 what the capacitor's own parasitics — the bottom plate to the backside metal, the MIM via, the
-Metal2 bridge — are worth on this resonator. Before the kernel was repaired the same run put 15 of
-its 50 rows at |S11| above 0 dB and its deepest match at −15.3 dB at 2.24 GHz: a plausible curve,
-19 % low, and wrong.
+Metal2 bridge — are worth on this resonator. **Agreement that close between two independent routes is
+the reason to trust either of them**, and the gap between them is the number to spend the third
+analysis level on when it matters.
 
 Read the resonance off |S11| rather than off |S21| on the all-EM run. |S21| is flat to 0.01 dB across
 the null while its loss slope keeps falling, so its maximum lands at 2.85 GHz — a statement about the
@@ -459,7 +455,6 @@ the gate on this recipe is the composed response and not an extracted L.
   plates leaves out the bottom plate's capacitance to the backside metal through 100 µm of εᵣ = 12.9,
   the MIM via's inductance and the Metal2 strap. On this structure the shunt arm reads a very stable
   0.113 pF, and 0.11 pF beside a 1 pF series element is a different resonator from an ideal one.
-  **That is now measurable rather than argued: run `SpiralResonator`, which has all of it in the
-  matrix, and compare.** The difference between the two answers IS what the parasitics are worth,
-  and it is the reason to spend the third analysis level when the answer has to be right rather than
-  quick.
+  **It is measurable rather than argued: run `SpiralResonator`, which has all of it in the matrix,
+  and compare.** The difference between the two answers IS what the parasitics are worth, and it is
+  the reason to spend the third analysis level when the answer has to be right rather than quick.

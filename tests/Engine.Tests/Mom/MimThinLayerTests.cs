@@ -202,8 +202,10 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         _out.WriteLine("WIDE:    " + wide);
 
         // MIM-9 moved the QUIET arm's own bound: "resolved by the mesh" is now said only inside the
-        // full-wave floor of 40, not inside the fill's 200. 12.5 and 0.833 are both inside it, so
-        // the two quiet rungs are unchanged; 500 is past both bounds and still shouts.
+        // full-wave floor, not inside the fill's own 200 — and since MIM-14 re-ran the de-embedded
+        // ladder on the repaired kernel that floor IS 200, so the two bounds coincide today. 12.5
+        // and 0.833 are inside it, so the two quiet rungs are unchanged; 500 is past both and still
+        // shouts.
         Assert.Contains("CELL/SEPARATION = 500", past);
         Assert.Contains("cell/separation = 12.5", shipped);
         Assert.Contains("are resolved by the mesh", shipped);
