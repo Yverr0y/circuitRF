@@ -3875,7 +3875,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         => a is ParametricSweepAnalysis psa ? $"sweep {psa.SweepVarName}" : a.Name;
 
     /// <summary>
-    /// The Analyses panel's card menu ▸ "Run This Analysis". Identical to the panel's Run in every
+    /// The Analyses panel's card menu ▸ Run (named after the card). Identical to the panel's Run in every
     /// respect but one — the plan is narrowed to the named card's CHAIN, sweeps and all — so the
     /// netlist, the corners, the results file and the Data Display refresh are all the ordinary ones.
     /// </summary>

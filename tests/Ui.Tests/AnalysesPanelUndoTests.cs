@@ -87,21 +87,26 @@ public sealed class AnalysesPanelUndoTests
     }
 
     /// <summary>
-    /// The card menu's Delete item names what it will remove. A sweep is named by the analysis it
-    /// ultimately wraps plus its own variable — never by its generated <c>Name</c>, which appears
-    /// nowhere on screen; the nested case proves the walk goes all the way down rather than one level.
+    /// The card menu's Remove and Run items both name the card they act on. A sweep is named by the
+    /// analysis it ultimately wraps plus its own variable — never by its generated <c>Name</c>, which
+    /// appears nowhere on screen; the nested case proves the walk goes all the way down rather than
+    /// one level.
     /// </summary>
     [Fact]
-    public void TheDeleteItem_NamesTheCard_AndASweepByItsBaseAndVariable()
+    public void TheCardMenuItems_NameTheCard_AndASweepByItsBaseAndVariable()
     {
         var (list, _, _) = Panel(
             new DcAnalysis("DC1"),
             new ParametricSweepAnalysis("DC1_sweep_Vgs", "Vgs", [0, 1, 2], "DC1"),
             new ParametricSweepAnalysis("DC1_sweep_Vgs_sweep_Vds", "Vds", [0, 5], "DC1_sweep_Vgs"));
 
-        Assert.Equal("Delete DC1",           list.Rows[0].DeleteLabel);
-        Assert.Equal("Delete DC1 Vgs Sweep", list.Rows[1].DeleteLabel);
-        Assert.Equal("Delete DC1 Vds Sweep", list.Rows[2].DeleteLabel);
+        Assert.Equal("Remove DC1",           list.Rows[0].RemoveLabel);
+        Assert.Equal("Remove DC1 Vgs Sweep", list.Rows[1].RemoveLabel);
+        Assert.Equal("Remove DC1 Vds Sweep", list.Rows[2].RemoveLabel);
+
+        Assert.Equal("Run DC1",           list.Rows[0].RunLabel);
+        Assert.Equal("Run DC1 Vgs Sweep", list.Rows[1].RunLabel);
+        Assert.Equal("Run DC1 Vds Sweep", list.Rows[2].RunLabel);
     }
 
     /// <summary>

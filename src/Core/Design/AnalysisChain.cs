@@ -104,7 +104,7 @@ public static class AnalysisChain
     /// <b>Naming an inner analysis is promoted rather than honoured</b>, because the alternative is a
     /// converged, plausible, complete-looking result with the sweep axis silently missing — a
     /// freq-swept loadpull run at one frequency looks exactly like a loadpull. The CLI's run verbs and
-    /// the Analyses panel's "Run This Analysis" share this one rule, so the same card runs the same
+    /// the Analyses panel card's own Run item share this one rule, so the same card runs the same
     /// thing whichever surface asked.
     /// </summary>
     public static Analysis PromoteToRunnableTop(Analysis named, TestBench tb)

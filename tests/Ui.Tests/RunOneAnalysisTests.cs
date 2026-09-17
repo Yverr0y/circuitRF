@@ -9,7 +9,7 @@ using Xunit;
 namespace CircuitRF.Ui.Tests;
 
 /// <summary>
-/// The Analyses panel's card menu ▸ "Run This Analysis" — one CHAIN, not the whole list. The narrowing
+/// The Analyses panel's card menu ▸ Run (named after the card) — one CHAIN, not the whole list. The narrowing
 /// is a parameter on <see cref="SchematicRunService.Prepare"/> rather than a second run path, so these
 /// tests state what the narrowed PLAN contains; everything after the plan (elaboration, the engines,
 /// the results file) is the ordinary run and is already covered.

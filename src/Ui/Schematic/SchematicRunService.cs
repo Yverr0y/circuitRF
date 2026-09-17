@@ -155,7 +155,7 @@ public static class SchematicRunService
     /// drops the sweep axis and still produces a converged, plausible, complete-looking result, so the
     /// mistake is invisible. This is the CLI's own rule for <c>-a</c>, shared rather than restated.
     /// <para/>
-    /// That narrowing is the whole difference between the panel's "Run This Analysis" and its Run
+    /// That narrowing is the whole difference between the panel card's own Run item and the panel's Run
     /// button — the netlist, the elaboration and the engines are identical either way, which is why the
     /// narrowing lives here rather than in a second run path.
     /// </summary>

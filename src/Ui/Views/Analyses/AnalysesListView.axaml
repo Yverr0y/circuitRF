@@ -267,11 +267,11 @@ overwrites silently on every subsequent run under that same name."/>
                                 <ContextMenu>
                                     <MenuItem Header="Run All Analyses"
                                               Command="{Binding Owner.RunAllCommand}"/>
-                                    <MenuItem Header="Run This Analysis"
+                                    <MenuItem Header="{Binding RunLabel}"
                                               Command="{Binding Owner.RunThisCommand}"
                                               CommandParameter="{Binding}"/>
                                     <Separator/>
-                                    <MenuItem Header="{Binding DeleteLabel}"
+                                    <MenuItem Header="{Binding RemoveLabel}"
                                               Command="{Binding Owner.DeleteRowCommand}"
                                               CommandParameter="{Binding}"/>
                                 </ContextMenu>

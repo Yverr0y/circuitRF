@@ -59,18 +59,26 @@ public sealed partial class AnalysisRowViewModel : ObservableObject
     public string Summary   => ComputeSummary(Analysis, _schematicVm.EditModel);
 
     /// <summary>
-    /// What the card menu's Delete item says — "Delete DC1", or "Delete DC1 Vgs Sweep" for a sweep.
-    /// A menu item naming what it will remove is worth the words here: the cards of one chain sit
-    /// directly under each other and differ only by an indent, so a bare "Delete" on the wrong one
-    /// looks exactly like a Delete on the right one.
+    /// How the card menu's items name this card — "DC1", or "DC1 Vgs Sweep" for a sweep. A menu item
+    /// naming what it will act on is worth the words here: the cards of one chain sit directly under
+    /// each other and differ only by an indent, so a bare "Remove" on the wrong one looks exactly
+    /// like a Remove on the right one.
     ///
     /// <para>A sweep is named by the analysis it ultimately wraps plus its own variable — NOT by its
     /// own <c>Name</c>, which is generated (<c>DC1_sweep_Vgs</c>, and <c>DC1_sweep_Vgs_sweep_Vds</c>
     /// once nested) and appears nowhere on screen.</para>
     /// </summary>
-    public string DeleteLabel => Analysis is ParametricSweepAnalysis psa
-        ? $"Delete {BaseAnalysisName(psa, _schematicVm.EditModel)} {psa.SweepVarName} Sweep"
-        : $"Delete {Analysis.Name}";
+    public string MenuName => Analysis is ParametricSweepAnalysis psa
+        ? $"{BaseAnalysisName(psa, _schematicVm.EditModel)} {psa.SweepVarName} Sweep"
+        : Analysis.Name;
+
+    /// <summary>What the card menu's Remove item says. "Remove", not "Delete", is the verb the rest
+    /// of circuitRF's menus use for taking something out of a document.</summary>
+    public string RemoveLabel => $"Remove {MenuName}";
+
+    /// <summary>What the card menu's Run item says — the one card's own name rather than "This
+    /// Analysis", so the item reads as the same card the pointer is over.</summary>
+    public string RunLabel => $"Run {MenuName}";
 
     /// <summary>
     /// The non-sweep analysis at the bottom of <paramref name="psa"/>'s chain. Walks
