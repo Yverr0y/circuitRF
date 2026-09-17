@@ -415,6 +415,20 @@
           "Dimension": "None"
         },
         {
+          "Name": "Pout_f2_W",
+          "Expression": "real(0.5*HB1.V(\u0022Vout\u0022,\u0022(0,1)\u0022)*conj(HB1.I(\u0022Iout\u0022,\u0022(0,1)\u0022)))",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
+          "Name": "Pout_f2_dBm",
+          "Expression": "10*log10(Pout_f2_W*1000)",
+          "Unit": "",
+          "ShowOnSchematic": true,
+          "Dimension": "None"
+        },
+        {
           "Name": "Gt_dB",
           "Expression": "Pout_f1_dBm - Pin_avail_dBm                   ; gain on one carrier",
           "Unit": "",
@@ -480,7 +494,7 @@
         },
         {
           "Name": "Eff",
-          "Expression": "2*Pout_f1_W/PDC_W*100                               ; both carriers",
+          "Expression": "(Pout_f1_W + Pout_f2_W)/PDC_W*100                 ; both carriers, each measured",
           "Unit": "",
           "ShowOnSchematic": true,
           "Dimension": "None"

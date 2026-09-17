@@ -13,9 +13,12 @@ Both benches place it and override that parameter. Push into it (`Ctrl+]`) to se
 Single tone at 2 GHz, drive swept 0 → 30 dBm. Gate biased at −3.05 V through a choke, drain fed
 from 48 V through another, 50 Ω load through a DC block.
 
-**`RL` is a resistor, not a Term, and that is deliberate.** A Term is an S-parameter element and is
-**inert (open) in harmonic balance** — an output terminated with one has no load at all, and the
-bench reports a gain of about −72 dB while converging happily on every point.
+**`RL` is a resistor, not a Term, and that is deliberate.** A Term is an S-parameter element: a
+driven port in an S-parameter analysis, and **inert (open) in every other analysis**, DC and
+harmonic balance alike. Its `Z` is the renormalization reference the S-matrix is defined against,
+not a resistor in the network — so an output terminated with one has no load at all, and the bench
+reports a gain of about −72 dB while converging happily on every point. In HB, drive with a
+`P1Tone`/`PnTone` source and terminate with an ordinary `R`.
 
 Four measurement blocks, which between them cover most of what a measurement can do:
 
@@ -36,8 +39,16 @@ Expected result: about 39.5 dBm output, 43 % drain efficiency, gain compressing 
 
 The same amplifier with a **PnTone** source at 1990 and 2010 MHz. Under two tones the spectral axis
 is `mixIndex` and the second accessor argument is a mixing-product tag rather than a harmonic
-number: `"(1,0)"` is the first carrier, `"(1,-1)"` is IM2, `"(2,-1)"` is the lower IM3, `"(0,0)"` is
-DC.
+number: `"(1,0)"` is the first carrier, `"(0,1)"` is the second, `"(1,-1)"` is IM2, `"(2,-1)"` is
+the lower IM3, `"(0,0)"` is DC.
 
 Only one of each conjugate pair is stored: **2f₂−f₁ is addressed as `"(1,-2)"`**, not `"(-1,2)"`.
 Asking for a tag that is not there is an error that lists every tag that is.
+
+**Each carrier is measured separately, and the efficiency adds them.** `Pout_f1_W` and `Pout_f2_W`
+are read at `"(1,0)"` and `"(0,1)"`, and `Eff` is `(Pout_f1_W + Pout_f2_W)/PDC_W*100`. Doubling one
+carrier instead would assume the two come out equal, and they do not — here the upper carrier runs
+0.03 dB low in back-off, the gap grows to 0.06 dB through compression and then **changes sign** near
+the top of the sweep, where the upper carrier comes out ahead. Doubling `Pout_f1_W` reads 0.25 pp
+high at 16 dBm drive and 0.22 pp low at 20 dBm — wrong in both directions, and worst exactly where
+the efficiency number is the one being quoted.

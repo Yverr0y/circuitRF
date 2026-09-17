@@ -28071,3 +28071,35 @@ stencil one: it has no shape under the cursor to name and does not belong on thi
 Gates: the eight `ClipAll_*` cases in `tests/Ui.Tests/LayoutBooleanOperationsViewModelTests.cs`,
 including one that pins Clip and Clip All as separate commands on the same stencil (the selection-scoped
 one must still leave unselected geometry byte-identical).
+
+## The two-tone example's efficiency doubled one carrier (2026-09-16)
+
+**Owner report, two halves, and only the second was a defect.** The Harmonic Balance example's
+README said a `Term` is inert (open) in HB; the owner expected a `Term` to be valid in both
+S-parameter and harmonic-balance runs. The README is right, and it is right by design rather than by
+accident — `HbLinearExtractor.StampInto` and `NonlinearDcEngine`'s assembly loop both skip
+`PortModel`/`TermModel` outright, which is Layer 1 of `brief-H-term-scoping-engine.md`: the 0 V
+branch a `Term` stamps is a DRIVEN port and stamping it anywhere else SHORTS the node, so the
+engines filter it instead. Confirmed on a two-line oracle rather than by reading: a 1 V tone behind
+50 Ω into a 50 Ω `R` gives V(out) = 0.5 at the fundamental, and the same netlist with
+`Term:T1 out 0 Num=1 Z=50 Ohm` in place of the resistor gives **1.0** — an open, exactly. The
+`Z` on a `Term` is the renormalization reference the S-matrix is defined against, not a resistor in
+the network. **Nothing warns**: `LintTopLevelTerms` only checks `Num` for duplicates and absence, so
+a `Term`-terminated HB bench converges happily on every point. The design doc's optional
+"present `Z` as a termination for a realistically-terminated bias point" (default OFF) was never
+built, and remains the only thing that would make the owner's expectation true.
+
+**The efficiency measure was genuinely wrong.** `TwoTone`'s `MeasDC` read
+`Eff = 2*Pout_f1_W/PDC_W*100`, which assumes the two carriers come out equal. They do not, and the
+error is not monotone: on this bench the upper carrier runs 0.03 dB low in back-off, the gap grows
+to 0.059 dB at 16 dBm drive, then **changes sign** by 19 dBm and the upper carrier comes out ahead.
+Doubling the lower one therefore reads 0.25 pp HIGH at 16 dBm and 0.22 pp LOW at 20 dBm — wrong in
+both directions, and worst across compression, which is the only part of the sweep anyone quotes.
+`Pout_f2_W` (and `Pout_f2_dBm`) are measured at mix tag `"(0,1)"` now and `Eff` sums them. Why the two
+carriers differ was not chased — the point of the fix is that the measurement no longer assumes they
+are equal.
+
+A practical note on editing a shipped example: **adding measure rows can collide with a neighbouring
+block, and nothing reports it** — a measure's inline `;` comment renders at full width, so the first
+version of this change ran `MeasCarriers`' text straight through `MeasDC`'s. `Cli render` on the
+`.csch` is the cheap check.
