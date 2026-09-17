@@ -67,6 +67,14 @@
                                 <Style Selector="ListBox.flat-select ListBoxItem:selected">
                                     <Setter Property="Background" Value="Transparent"/>
                                 </Style>
+                                <!-- IconSelectButton.PopupColumns > 1 re-panels PART_ListBox as a
+                                     WrapPanel and adds grid-pick. A wrap panel sizes each cell to
+                                     its own content, so without this the columns come out ragged;
+                                     the width MUST match IconSelectButton.GridCellPx. -->
+                                <Style Selector="ListBox.grid-pick ListBoxItem">
+                                    <Setter Property="Width"   Value="22"/>
+                                    <Setter Property="Padding" Value="0"/>
+                                </Style>
                             </Border.Styles>
                             <ListBox x:Name="PART_ListBox"
                                      ItemsSource="{TemplateBinding ItemsSource}"

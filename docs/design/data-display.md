@@ -171,8 +171,11 @@ The Data Display's property editor **merges two existing UIs** (locked direction
 - **Function + panel-feel from splotRF's `PlotInspectorView`:** a **live, docked, per-plot properties
   inspector** (not a modal dialog). Plot-level row (plot Type / Freq unit / table Font), an **Add Trace**
   action, a scrollable **trace-card list**, per-card add/remove, **immediate redraw on every edit**,
-  color-swatch combos and Material-icon combos (marker shape, secondary-axis arrow, trash). Every change
-  re-renders the plot at once — the inspector is always-available, not an OK/Cancel modal.
+  color-swatch combos and Material-icon combos (secondary-axis arrow, trash). Every change
+  re-renders the plot at once — the inspector is always-available, not an OK/Cancel modal. The marker
+  shape picker is the one that is NOT a Material icon: its options are drawn from `MarkerGlyph`, the
+  same outline table `TraceRenderer` draws a sample with, so the popup cannot offer a shape the plot
+  will not draw. It opens as a grid (`IconSelectButton.PopupColumns`) because there are fourteen.
 - **Visual language from circuitRF's `AnalysisEditorDialog` + body views:** circuitRF theme brushes
   (`SystemRegion`/`SystemChrome*`/`SystemBase*`, `CrfWarningBrush`), **opacity-tiered labels** (~0.6 field
   labels, ~0.55 secondary/preview text), **segmented `.active` toggle buttons** for mode-like choices

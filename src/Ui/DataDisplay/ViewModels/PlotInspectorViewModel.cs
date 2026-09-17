@@ -10,7 +10,6 @@ using System.Numerics;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Material.Icons;
 using RfCore;
 using RfCore.Data;
 using RfCore.Loadpull;
@@ -113,12 +112,10 @@ public partial class PlotInspectorViewModel : ViewModelBase
     public static IReadOnlyList<TableOptimum>    AllTableOptima    { get; } = Enum.GetValues<TableOptimum>().ToList();
     public static IReadOnlyList<TableReadMode>   AllTableReadModes { get; } = Enum.GetValues<TableReadMode>().ToList();
 
-    // Marker types as icon-bearing wrappers so the combo can display glyphs.
-    public static IReadOnlyList<MarkerTypeItem> AllMarkerTypes { get; } = new[]
-    {
-        new MarkerTypeItem(MarkerType.Circle, MaterialIconKind.Circle),
-        new MarkerTypeItem(MarkerType.Square, MaterialIconKind.Square),
-    };
+    // Marker types as glyph-bearing wrappers so the combo can display the real shapes.
+    // Driven off the enum: a new MarkerType appears in the picker by existing.
+    public static IReadOnlyList<MarkerTypeItem> AllMarkerTypes { get; } =
+        Enum.GetValues<MarkerType>().Select(t => new MarkerTypeItem(t)).ToList();
 
     // Merged line-mode options: [Off, Solid, Dashed, …] for the icon-pick.
     public static IReadOnlyList<LineModeItem> LineModes { get; } =
@@ -126,13 +123,17 @@ public partial class PlotInspectorViewModel : ViewModelBase
         .Concat(Enum.GetValues<LineType>().Select(t => new LineModeItem(false, t)))
         .ToArray();
 
-    // Merged symbol-mode options: [Off, Circle, Square] for the icon-pick.
-    public static IReadOnlyList<SymbolModeItem> SymbolModes { get; } = new[]
-    {
-        new SymbolModeItem(true,  default,          MaterialIconKind.CircleOutline),
-        new SymbolModeItem(false, MarkerType.Circle, MaterialIconKind.Circle),
-        new SymbolModeItem(false, MarkerType.Square, MaterialIconKind.Square),
-    };
+    // Merged symbol-mode options: [Off, then every MarkerType] for the icon-pick.
+    public static IReadOnlyList<SymbolModeItem> SymbolModes { get; } =
+        new[] { new SymbolModeItem(true, default) }
+        .Concat(Enum.GetValues<MarkerType>().Select(t => new SymbolModeItem(false, t)))
+        .ToArray();
+
+    /// <summary>
+    /// Columns the symbol picker's popup lays its options out in. Fifteen rows in one 34 px column
+    /// is a 330 px ribbon of 10 px glyphs hanging off a trace card; four columns is four rows.
+    /// </summary>
+    public const int SymbolPickerColumns = 4;
 
     // All cube transform options — every entry enabled (used for cube-bound traces).
     public static IReadOnlyList<CubeTransformItem> AllCubeTransforms { get; } =

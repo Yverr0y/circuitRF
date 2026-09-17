@@ -4,14 +4,14 @@
 //  YAxisItem    — DependentVarFormat entry with a proper label and
 //                 IsEnabled flag (Complex is disabled on Rect plots).
 //
-//  MarkerTypeItem — MarkerType entry paired with a MaterialIconKind
-//                   so the marker combo can show icons instead of text.
+//  MarkerTypeItem — MarkerType entry paired with the glyph GEOMETRY the
+//                   renderer draws, so the picker shows the real shape.
 // ================================================================
 
 using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using Material.Icons;
+using Avalonia.Media;
 using RfCore;
 using CircuitRF.Ui.DataDisplay;
 
@@ -96,16 +96,35 @@ public sealed class MatrixFormatConverter : IValueConverter
 }
 
 // ---- MarkerTypeItem --------------------------------------------------------
+//  A MarkerType paired with the GEOMETRY the plot draws for it, parsed once from
+//  MarkerGlyph's own outline. The picker used to carry a hand-picked MaterialIcon
+//  per shape; with fourteen shapes that is fourteen chances for the icon and the
+//  plot to disagree, and the icon set has no bowtie or hourglass at all.
 
 public sealed class MarkerTypeItem
 {
-    public MarkerType       Value { get; }
-    public MaterialIconKind Icon  { get; }
+    /// <summary>Glyph radius, in px, for the picker's icons.</summary>
+    public const double IconRadius = 5.0;
 
-    public MarkerTypeItem(MarkerType value, MaterialIconKind icon)
+    private Geometry? _glyph;
+
+    public MarkerType Value     { get; }
+    public string     GlyphData { get; }
+    public string     Label     { get; }
+
+    /// <summary>
+    /// <b>Parsed on first bind, never in the static list that builds these.</b>
+    /// <c>Geometry.Parse</c> reaches for <c>IPlatformRenderInterface</c>, so parsing eagerly gives
+    /// the option lists a dependency on Avalonia being up — and a static initializer that throws
+    /// takes the whole inspector with it rather than one icon.
+    /// </summary>
+    public Geometry Glyph => _glyph ??= Geometry.Parse(GlyphData);
+
+    public MarkerTypeItem(MarkerType value)
     {
-        Value = value;
-        Icon  = icon;
+        Value     = value;
+        GlyphData = MarkerGlyph.SvgPath(value, IconRadius);
+        Label     = MarkerGlyph.Description(value);
     }
 }
 
@@ -157,13 +176,26 @@ public sealed class CubeTransformItem
 
 public sealed class SymbolModeItem
 {
-    public bool             IsOff   { get; }
-    public MarkerType       Shape   { get; }
-    public MaterialIconKind Icon    { get; }
-    public double           Opacity => IsOff ? 0.25 : 1.0;
+    private Geometry? _glyph;
 
-    public SymbolModeItem(bool isOff, MarkerType shape, MaterialIconKind icon)
+    public bool       IsOff     { get; }
+    public MarkerType Shape     { get; }
+    public string?    GlyphData { get; }
+    public string     Label     { get; }
+    public double     Opacity   => IsOff ? 0.35 : 1.0;
+
+    /// <summary>The "Off" row draws no glyph — the template shows its own struck-through icon.</summary>
+    public bool IsOn => !IsOff;
+
+    /// <summary>Parsed on first bind — see <see cref="MarkerTypeItem.Glyph"/> for why not sooner.</summary>
+    public Geometry? Glyph =>
+        GlyphData is null ? null : _glyph ??= Geometry.Parse(GlyphData);
+
+    public SymbolModeItem(bool isOff, MarkerType shape)
     {
-        IsOff = isOff; Shape = shape; Icon = icon;
+        IsOff     = isOff;
+        Shape     = shape;
+        GlyphData = isOff ? null : MarkerGlyph.SvgPath(shape, MarkerTypeItem.IconRadius);
+        Label     = isOff ? "Off" : MarkerGlyph.Description(shape);
     }
 }

@@ -33,7 +33,26 @@ namespace CircuitRF.Render.DataDisplay
     //  MarkerType / LineType
     // ============================================================
 
-    public enum MarkerType { Circle, Square }
+    /// <summary>
+    /// The per-point symbol a trace draws.
+    ///
+    /// <para><b>The member NAME is what a `.cdd` persists</b> (the config carries a
+    /// <c>JsonStringEnumConverter</c>), so <c>Circle</c> and <c>Square</c> keep their spelling and
+    /// every file written before the rest existed still loads. Order is display order in the trace
+    /// card's picker; the numeric values are not written anywhere.</para>
+    ///
+    /// <para>Geometry for all of them lives in one place — <see cref="MarkerGlyph"/> — which both
+    /// the renderer and the picker read.</para>
+    /// </summary>
+    public enum MarkerType
+    {
+        Circle, Square, Diamond,
+        TriangleUp, TriangleDown, TriangleLeft, TriangleRight,
+        Plus, Cross, Star,
+        Pentagon, Hexagon,
+        Bowtie, Hourglass
+    }
+
     public enum LineType   { Solid,  Dashed  }
 
     // ============================================================
@@ -123,7 +142,7 @@ namespace CircuitRF.Render.DataDisplay
 
         public static readonly int[]        LineColorOrder  = { 12, 1, 9, 6, 11, 2, 10, 4, 5, 0, 7 };
         public static readonly double[]     LineWidthOrder  = { 1.0, 0.75 };
-        public static readonly MarkerType[] MarkerTypeOrder = { MarkerType.Circle, MarkerType.Square };
+        public static readonly MarkerType[] MarkerTypeOrder = Enum.GetValues<MarkerType>();
 
         public static SKColor DefaultLineColor   = ColorLUT[12];   // Red
         public static SKColor DefaultMarkerColor = ColorLUT[12];   // Red

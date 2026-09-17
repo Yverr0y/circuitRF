@@ -2396,3 +2396,58 @@ the one thing nobody is watching. The gate is two tests in
 export → `LoadFileAsync` → bind a trace to the library's live SNP → overwrite the same path →
 `ReloadChangedAsync` — in both directions (a re-run that solves MORE points, and one that solves
 fewer). Both fail without the two added lines.
+
+## Owner request, 2026-09-16 — fourteen marker shapes instead of two
+
+A trace could draw its samples as a circle or a square. It can now draw them as a circle, square,
+diamond, triangle (up/down/left/right), plus, cross, star, pentagon, hexagon, bowtie or hourglass —
+persisted in the `.cdd`, and offered in the trace card's symbol picker.
+
+**The geometry has ONE home and both consumers read it.** `MarkerGlyph`
+(`src/Render/DataDisplay/Models/MarkerGlyph.cs`) holds a vertex table in units of the marker radius;
+`TraceRenderer` builds an `SKPath` from it, and the trace card's picker parses the same outline —
+emitted as SVG path data by `MarkerGlyph.SvgPath` — into an Avalonia `Geometry`. The picker used to
+pair each `MarkerType` with a hand-picked `MaterialIconKind`. At two shapes that is a look-alike
+nobody notices; at fourteen it is fourteen chances for the popup and the plot to disagree, and the
+icon set has no bowtie or hourglass to pick in the first place.
+
+**Every glyph is ONE closed path, and that constraint is what made the change small.** The existing
+treatment — fill in the marker colour, then a dark outline stroke — applies unchanged to a single
+path, while a glyph assembled from several overlapping pieces would draw its own internal seams
+where they meet. It is also why there is no asterisk: three crossing bars are three pieces, and a
+star already reads as the same thing. Bowtie and Hourglass are deliberately SELF-INTERSECTING
+quads; under the non-zero winding rule each lobe still fills, and the stroke draws the crossing
+that makes them readable at 3 px.
+
+**Circle and Square keep their own draw calls.** They are the two shapes every `.cdd` in existence
+names, so `TraceRenderer` still reaches `DrawOval`/`DrawRect` for them rather than routing them
+through the path — and `MarkerGlyphTests.TheTwoOriginalShapesRenderExactlyAsBefore` compares the
+result against the pre-change arithmetic, written out as its own reference, pixel for pixel. The
+other twelve carry a per-shape WEIGHT (1.0–1.3) because a square of half-width r covers 4r² against
+a diamond's 2r²: drawn at one radius the set reads as different SIZES rather than different shapes.
+Circle and Square are pinned at 1.0 for the compatibility reason above.
+
+**The file format needed nothing.** `TracePropertiesConfig.MarkerType` carries a
+`JsonStringEnumConverter`, so the member NAME is what a `.cdd` stores — adding members loads every
+older file unchanged. The corollary is that RENAMING one would silently reset every trace using it
+to `Circle`, which is why the enum's doc comment says so.
+
+Three Avalonia traps, all of which fail quietly:
+
+- **`Geometry.Parse` needs `IPlatformRenderInterface`.** Parsing the outlines eagerly in the
+  picker's static option lists gave `PlotInspectorViewModel`'s static constructor a dependency on
+  Avalonia being up — and a static initializer that throws takes the whole inspector with it, not
+  one icon. It surfaced as a `TypeInitializationException` the moment a test touched the list with
+  no display. Both `MarkerTypeItem` and `SymbolModeItem` now hold the path DATA and parse on first
+  bind; the gate asserts the string, which is also why it needs no display of its own.
+- **A `Shape` with `Stretch="None"` measures only its POSITIVE quadrant.** The outlines are centred
+  on the origin, so `Path` sized its desired area from `(Right, Bottom)` alone and the top-left half
+  of every symbol would have been cut off with nothing reporting it. `Stretch="Uniform"` with an
+  explicit width and height translates and scales it into the box.
+- **A `WrapPanel` inside a `ListBox` never wraps** if the list's own scroll viewer measures it at
+  infinite width. `IconSelectButton.PopupColumns` (new; 1 is the original vertical list and changes
+  nothing) therefore sets `HorizontalScrollBarVisibility="Disabled"` along with the panel and the
+  width. Without it the grid comes out as one long row — the exact layout the property exists to
+  avoid. The popup's cells are square and pinned by the `grid-pick` style in `SegmentedSelect.axaml`,
+  whose width MUST track `IconSelectButton.GridCellPx`; a wrap panel otherwise sizes each cell to
+  its own glyph and the columns come out ragged.

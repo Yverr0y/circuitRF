@@ -148,14 +148,36 @@ namespace CircuitRF.Render.DataDisplay
                 //  Trace.PointIsSolved still reports the run's own mask and is still the truth
                 //  about the result; it is just not something the plot draws. Anything that needs
                 //  to report it does so in words.
+
+                //  Circle and Square keep their own draw calls: they are the two shapes that
+                //  existed before the rest, and a saved `.cdd` must come back pixel-identical.
+                //  Every other glyph is ONE closed path from MarkerGlyph, built at this size once
+                //  and translated per point — the outline does not change between points, and
+                //  rebuilding it for each of a few thousand samples is measurable.
+                var shape = props.MarkerType;
+                using SKPath? glyph = shape is MarkerType.Circle or MarkerType.Square
+                    ? null
+                    : MarkerGlyph.BuildPath(shape, ms);
+
                 for (int k = 0; k < trace.Points.Count; k++)
                 {
                     var pt   = trace.Points[k];
                     if (!tf.XIsPlottable(pt.X)) continue;
                     var px   = tf.ToCanvas(pt.X, pt.Y, useSecondary);
+
+                    if (glyph != null)
+                    {
+                        canvas.Save();
+                        canvas.Translate(px.X, px.Y);
+                        canvas.DrawPath(glyph, fillPaint);
+                        canvas.DrawPath(glyph, strokePaint);
+                        canvas.Restore();
+                        continue;
+                    }
+
                     var rect = new SKRect(px.X - ms, px.Y - ms, px.X + ms, px.Y + ms);
 
-                    if (props.MarkerType == MarkerType.Square)
+                    if (shape == MarkerType.Square)
                     {
                         canvas.DrawRect(rect, fillPaint);
                         canvas.DrawRect(rect, strokePaint);

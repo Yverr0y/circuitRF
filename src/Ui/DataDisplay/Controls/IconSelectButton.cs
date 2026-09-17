@@ -5,6 +5,7 @@
 //  the seg-btn class).  Not a ComboBox.
 // ================================================================
 
+using System;
 using System.Collections;
 using Avalonia;
 using Avalonia.Controls;
@@ -34,6 +35,9 @@ public class IconSelectButton : TemplatedControl
 
     public static readonly StyledProperty<bool> HighlightSelectedProperty =
         AvaloniaProperty.Register<IconSelectButton, bool>(nameof(HighlightSelected), defaultValue: true);
+
+    public static readonly StyledProperty<int> PopupColumnsProperty =
+        AvaloniaProperty.Register<IconSelectButton, int>(nameof(PopupColumns), defaultValue: 1);
 
     public IEnumerable? ItemsSource
     {
@@ -65,6 +69,18 @@ public class IconSelectButton : TemplatedControl
         set => SetValue(HighlightSelectedProperty, value);
     }
 
+    /// <summary>
+    /// How many options the popup lays out per row. <b>1 (the default) is the original vertical
+    /// list and changes nothing.</b> Above 1 the popup wraps into a grid of
+    /// <see cref="GridCellPx"/> square cells — which is what keeps a long option set (the trace
+    /// card's fourteen marker shapes) from opening as a ribbon taller than the panel it hangs off.
+    /// </summary>
+    public int PopupColumns
+    {
+        get => GetValue(PopupColumnsProperty);
+        set => SetValue(PopupColumnsProperty, value);
+    }
+
     // ---- Template parts ----------------------------------------------------
 
     private Button?  _button;
@@ -89,6 +105,7 @@ public class IconSelectButton : TemplatedControl
 
         ApplyHighlight();
         ApplyHighlightSelected();
+        ApplyPopupColumns();
         SyncListBoxSelection();
     }
 
@@ -98,6 +115,7 @@ public class IconSelectButton : TemplatedControl
         if (change.Property == HighlightProperty)         ApplyHighlight();
         if (change.Property == HighlightSelectedProperty) { ApplyHighlight(); ApplyHighlightSelected(); }
         if (change.Property == SelectedItemProperty)      SyncListBoxSelection();
+        if (change.Property == PopupColumnsProperty)      ApplyPopupColumns();
         // A REPLACED item list clears the ListBox's selection without anything telling this control,
         // so the popup opened next with nothing highlighted while the face still showed the choice.
         // The Match Designer's Order selector is bound to a collection that is genuinely rebuilt when
@@ -124,6 +142,50 @@ public class IconSelectButton : TemplatedControl
             _listBox.Classes.Remove("flat-select");
         else
             _listBox.Classes.Add("flat-select");
+    }
+
+    // ---- Grid popup ---------------------------------------------------------
+
+    /// <summary>
+    /// Re-panel the popup's ListBox as a wrapping grid when more than one column is asked for.
+    ///
+    /// <para>The template binds the ListBox's width to the BUTTON's width so a one-per-row popup is
+    /// exactly as wide as the face it drops from. A grid has to overrule that — and it must also
+    /// pin each item's width, since a wrap panel otherwise sizes every cell to its own glyph and
+    /// the columns come out ragged.</para>
+    /// </summary>
+    /// <summary>
+    /// Grid cell size, in px. Square, and equal to the item height the popup's own
+    /// <c>ItemContainerTheme</c> sets — the <c>grid-pick</c> style in SegmentedSelect.axaml pins the
+    /// matching width, so the two have to move together.
+    /// </summary>
+    internal const double GridCellPx = 22.0;
+
+    private void ApplyPopupColumns()
+    {
+        if (_listBox == null) return;
+
+        int cols = Math.Max(1, PopupColumns);
+        if (cols == 1)
+        {
+            _listBox.ClearValue(ItemsControl.ItemsPanelProperty);
+            _listBox.Classes.Remove("grid-pick");
+            _listBox.ClearValue(ListBox.WidthProperty);
+            _listBox.ClearValue(ScrollViewer.HorizontalScrollBarVisibilityProperty);
+            return;
+        }
+
+        _listBox.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal
+        });
+        if (!_listBox.Classes.Contains("grid-pick")) _listBox.Classes.Add("grid-pick");
+        _listBox.Width = cols * GridCellPx;
+
+        // Without this the list's own scroll viewer may measure its panel at INFINITE width, and a
+        // wrap panel given infinite width never wraps — the grid comes out as one long row, which
+        // is the layout this whole property exists to avoid.
+        ScrollViewer.SetHorizontalScrollBarVisibility(_listBox, ScrollBarVisibility.Disabled);
     }
 
     // ---- Selection sync ----------------------------------------------------

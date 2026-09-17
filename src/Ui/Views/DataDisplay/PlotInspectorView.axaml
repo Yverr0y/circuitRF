@@ -1819,21 +1819,43 @@
                                                 <ColumnDefinition Width="*"  MinWidth="40" MaxWidth="95"/>
                                             </Grid.ColumnDefinitions>
 
-                                            <!-- Symbol ISB: Off / Circle / Square -->
+                                            <!-- Symbol ISB: Off, then every marker shape. The
+                                                 options draw themselves from MarkerGlyph — the
+                                                 same outline the plot draws — so the popup cannot
+                                                 show a shape the trace will not. -->
                                             <ctl:IconSelectButton Grid.Column="0"
                                                                   Margin="0,0,6,0"
                                                                   ItemsSource="{x:Static vm:PlotInspectorViewModel.SymbolModes}"
                                                                   SelectedItem="{Binding SelectedSymbolMode, Mode=TwoWay}"
                                                                   Highlight="{Binding MarkerEnabled}"
                                                                   HighlightSelected="False"
-                                                                  ToolTip.Tip="Marker shape (Off / Circle / Square)">
+                                                                  PopupColumns="{x:Static vm:PlotInspectorViewModel.SymbolPickerColumns}"
+                                                                  ToolTip.Tip="Marker shape">
                                                 <ctl:IconSelectButton.ItemTemplate>
                                                     <DataTemplate x:DataType="vm:SymbolModeItem">
-                                                        <mi:MaterialIcon Kind="{Binding Icon}"
-                                                                         Width="10" Height="10"
-                                                                         Opacity="{Binding Opacity}"
-                                                                         HorizontalAlignment="Center"
-                                                                         VerticalAlignment="Center"/>
+                                                        <Panel Width="14" Height="14"
+                                                               Background="Transparent"
+                                                               ToolTip.Tip="{Binding Label}">
+                                                            <mi:MaterialIcon Kind="CircleOffOutline"
+                                                                             Width="10" Height="10"
+                                                                             Opacity="{Binding Opacity}"
+                                                                             IsVisible="{Binding IsOff}"
+                                                                             HorizontalAlignment="Center"
+                                                                             VerticalAlignment="Center"/>
+                                                            <!-- Stretch=Uniform is load-bearing: the
+                                                                 glyph outline is centred on the
+                                                                 ORIGIN, and a Shape with Stretch=None
+                                                                 measures only its positive quadrant,
+                                                                 so half of every symbol would be cut
+                                                                 off with nothing reporting it. -->
+                                                            <Path Data="{Binding Glyph}"
+                                                                  Fill="{DynamicResource SystemBaseHighColor}"
+                                                                  Stretch="Uniform"
+                                                                  Width="11" Height="11"
+                                                                  IsVisible="{Binding IsOn}"
+                                                                  HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center"/>
+                                                        </Panel>
                                                     </DataTemplate>
                                                 </ctl:IconSelectButton.ItemTemplate>
                                             </ctl:IconSelectButton>
