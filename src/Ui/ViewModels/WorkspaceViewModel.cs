@@ -3529,7 +3529,8 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         StopAnalysisCommand.NotifyCanExecuteChanged();
     }
 
-    private async Task RunSchematicDocAsync(SchematicDocument activeDoc)
+    private async Task RunSchematicDocAsync(SchematicDocument activeDoc,
+                                            Core.Design.Analysis? onlyAnalysis = null)
     {
         // The Analyses panel's own Run button reaches this directly rather than through
         // RunAnalysisCommand, so its CanExecute gate does not cover this path. One run at a time:
@@ -3543,6 +3544,12 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
 
         var testBenchName = activeDoc.Id;
 
+        // What every line of this run is labelled with. The bench alone is right for a whole-list run
+        // and wrong for a single card: "Running 'PA'" beside a progress bar says nothing about WHICH
+        // analysis is being waited for, and on a narrowed run that is the only thing worth knowing.
+        var runLabel = onlyAnalysis is null ? testBenchName : $"{testBenchName} · {CardLabel(onlyAnalysis)}";
+        var onlyAnalysisName = onlyAnalysis?.Name;
+
         // Step 1: extract + write netlist.cnl (synchronous — fast).
         string netlistPath;
         string baseDir;
@@ -3554,13 +3561,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             foreach (var conflict in conflicts)
                 Messages.Warning($"Extraction: {conflict}");
             Messages.Success("Wrote netlist", netlistPath);
-            Diagnostics.CrashReporter.Note($"run: '{testBenchName}' netlist written to {netlistPath}");
+            Diagnostics.CrashReporter.Note($"run: '{runLabel}' netlist written to {netlistPath}");
         }
         catch (Exception ex)
         {
             Messages.Error($"Netlist write failed: {ex.Message}");
             Diagnostics.CrashReporter.Note(
-                $"run: '{testBenchName}' netlist write FAILED - {ex.GetType().Name}: {ex.Message}");
+                $"run: '{runLabel}' netlist write FAILED - {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
@@ -3575,13 +3582,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         RunPlan plan;
         try
         {
-            plan = await Task.Run(() => SchematicRunService.Prepare(netlistPath, workspaceRoot));
+            plan = await Task.Run(() => SchematicRunService.Prepare(netlistPath, workspaceRoot, onlyAnalysisName));
         }
         catch (Exception ex)
         {
             Messages.Error($"Run failed unexpectedly: {ex.Message}");   // defensive: Prepare never throws
             Diagnostics.CrashReporter.Note(
-                $"run: '{testBenchName}' prepare THREW - {ex.GetType().Name}: {ex.Message}");
+                $"run: '{runLabel}' prepare THREW - {ex.GetType().Name}: {ex.Message}");
             return;
         }
 
@@ -3597,7 +3604,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             // because the trail is what gets read when there is no stack, and a run that ends with
             // no note reads as a run that vanished.
             Diagnostics.CrashReporter.Note(
-                $"run: '{testBenchName}' NOT run - {plan.Status}: {plan.StatusMessage}");
+                $"run: '{runLabel}' NOT run - {plan.Status}: {plan.StatusMessage}");
             return;
         }
 
@@ -3605,13 +3612,13 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             Messages.Info(line);
 
         Diagnostics.CrashReporter.Note(
-            $"run: '{testBenchName}' planned — {plan.Analyses.Count} analysis, {plan.TotalWorkUnits} work unit(s)");
+            $"run: '{runLabel}' planned — {plan.Analyses.Count} analysis, {plan.TotalWorkUnits} work unit(s)");
         foreach (var line in plan.Lines)
             Diagnostics.CrashReporter.Note($"run:   {line}");
 
         // Step 3: run the engine on a background thread so the UI stays responsive — and so Stop has
         // a thread to interrupt.
-        var live = Messages.BeginProgress($"Running '{testBenchName}'…");
+        var live = Messages.BeginProgress($"Running '{runLabel}'…");
 
         RunResult result;
         using (var cts = new CancellationTokenSource())
@@ -3620,7 +3627,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             // Cancel are ONE request through ONE object (owner, 2026-08-19). Whichever the user
             // reaches for, the other two go grey — the handle refuses a second ask, and CanStopAnalysis
             // reads the same token — so nothing offers to stop a run that is already stopping.
-            var cancellation = new RunCancellation($"the run of '{testBenchName}'", () => RequestStop(cts));
+            var cancellation = new RunCancellation($"the run of '{runLabel}'", () => RequestStop(cts));
             _runCancellation = cancellation;
             live.BindCancellation(cancellation);
 
@@ -3630,7 +3637,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 Total = plan.TotalWorkUnits,
                 // Progress<T> captures the UI SynchronizationContext here, so every observation lands
                 // on the UI thread without the engine knowing anything about threading.
-                Progress = new Progress<RunProgress>(p => ReportRunProgress(live, testBenchName, p)),
+                Progress = new Progress<RunProgress>(p => ReportRunProgress(live, runLabel, p)),
             };
 
             // Set INSIDE the try, so no path between here and the finally can leave the run flagged as
@@ -3647,7 +3654,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 // The finally below still writes "left the engine" on the way out, which on its own
                 // reads as an ordinary return. Say that it threw, and with what.
                 Diagnostics.CrashReporter.Note(
-                    $"run: '{testBenchName}' engine THREW - {ex.GetType().Name}: {ex.Message}");
+                    $"run: '{runLabel}' engine THREW - {ex.GetType().Name}: {ex.Message}");
                 return;
             }
             finally
@@ -3655,14 +3662,14 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
                 cancellation.Finish();
                 _runCancellation = null;
                 SetRunning(null);
-                Diagnostics.CrashReporter.Note($"run: '{testBenchName}' left the engine");
+                Diagnostics.CrashReporter.Note($"run: '{runLabel}' left the engine");
             }
         }
 
         // How it ended, on the line after it ended. "left the engine" says the engine returned, not
         // what it returned - and a cancelled run and a successful one are indistinguishable in a
         // trail that stops there.
-        Diagnostics.CrashReporter.Note($"run: '{testBenchName}' outcome {result.Status}");
+        Diagnostics.CrashReporter.Note($"run: '{runLabel}' outcome {result.Status}");
 
         if (result.Status == RunStatus.Cancelled)
         {
@@ -3672,7 +3679,7 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
             live.Finish(MessageLevel.Warning, "cancelled, no results written", keepBar: false);
             foreach (var n in result.Notes)    Messages.Info(n);
             foreach (var w in result.Warnings) Messages.Warning(w);
-            Messages.Info($"Stopped '{testBenchName}'.");
+            Messages.Info($"Stopped '{runLabel}'.");
             return;
         }
 
@@ -3694,15 +3701,15 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             case RunStatus.NoAnalysis:
                 live.Finish(MessageLevel.Info, result.StatusMessage, keepBar: false);
-                Messages.Info($"Finished '{testBenchName}'.");
+                Messages.Info($"Finished '{runLabel}'.");
                 break;
             case RunStatus.EngineError:
                 live.Finish(MessageLevel.Error, result.StatusMessage, keepBar: false);
-                Messages.Info($"Finished '{testBenchName}'.");
+                Messages.Info($"Finished '{runLabel}'.");
                 break;
             case RunStatus.Success:
                 live.Finish(MessageLevel.Success, result.StatusMessage, keepBar: false);
-                Messages.Info($"Finished '{testBenchName}'.");
+                Messages.Info($"Finished '{runLabel}'.");
 
                 // Loadpull / Loadpull-Pursuit outcome counts. Reported per analysis and only for the
                 // ones that actually swept a termination grid — Describe returns null for every other
@@ -3820,6 +3827,10 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         {
             listVm.RunRequested -= OnAnalysesRunRequested;
             listVm.RunRequested += OnAnalysesRunRequested;
+            listVm.RunOneRequested -= OnAnalysesRunOneRequested;
+            listVm.RunOneRequested += OnAnalysesRunOneRequested;
+            listVm.EditCommitted -= OnAnalysesEditCommitted;
+            listVm.EditCommitted += OnAnalysesEditCommitted;
         }
     }
 
@@ -3828,6 +3839,45 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         var doc = (_factory.DocumentDock?.ActiveDockable as SchematicDocument) ?? _lastActiveSchematicDoc;
         if (doc is null) { Messages.Warning("Run: no schematic available."); return; }
         _ = RunSchematicDocAsync(doc);
+    }
+
+    /// <summary>
+    /// An edit made in the Analyses panel is what makes that schematic SESSION the undo target —
+    /// exactly as making an edit in an editor does, by way of that editor being the active document.
+    ///
+    /// <para>The panel needs saying explicitly because none of the three things that normally answer
+    /// "whose history is this" hold for it: it is a TOOL, so it is never the document dock's active
+    /// dockable; it deliberately RETAINS its schematic when focus moves, so its analyses stay readable
+    /// beside the Data Display a run has just opened in front of it; and it edits the BASE session
+    /// even while that tab is pushed into a sub-cell, because a TestBench belongs to the top-level
+    /// cell. Undo followed the active document through all three and therefore had nothing to do with
+    /// the edit the user had just made — "Undo/Redo does not work for deleting an analysis"
+    /// (owner, 2026-09-16).</para>
+    ///
+    /// <para>Activating any document retargets it again, so this is a pin only until the user's next
+    /// click lands somewhere that owns a history of its own.</para>
+    /// </summary>
+    private void OnAnalysesEditCommitted(SchematicViewModel schematicVm)
+        => SetActiveUndoTarget(new SessionUndoTarget(schematicVm.UndoRedo));
+
+    /// <summary>
+    /// A card's label as the Analyses panel DRAWS it, for the run lines to name. A sweep card shows the
+    /// swept variable rather than the generated analysis name, so a progress row reading
+    /// "DC1_sweep_Vgs" would name something the user cannot see anywhere on screen.
+    /// </summary>
+    internal static string CardLabel(Core.Design.Analysis a)
+        => a is ParametricSweepAnalysis psa ? $"sweep {psa.SweepVarName}" : a.Name;
+
+    /// <summary>
+    /// The Analyses panel's card menu ▸ "Run This Analysis". Identical to the panel's Run in every
+    /// respect but one — the plan is narrowed to the named card — so the netlist, the corners, the
+    /// results file and the Data Display refresh are all the ordinary ones.
+    /// </summary>
+    private void OnAnalysesRunOneRequested(Core.Design.Analysis analysis)
+    {
+        var doc = (_factory.DocumentDock?.ActiveDockable as SchematicDocument) ?? _lastActiveSchematicDoc;
+        if (doc is null) { Messages.Warning("Run: no schematic available."); return; }
+        _ = RunSchematicDocAsync(doc, analysis);
     }
 
     /// <summary>

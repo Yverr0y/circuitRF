@@ -28103,3 +28103,83 @@ A practical note on editing a shipped example: **adding measure rows can collide
 block, and nothing reports it** — a measure's inline `;` comment renders at full width, so the first
 version of this change ran `MeasCarriers`' text straight through `MeasDC`'s. `Cli render` on the
 `.csch` is the cheap check.
+
+---
+
+## Analyses panel — a card's own context menu (2026-09-16)
+
+Right-click on an analysis card now offers **Run All Analyses**, **Run This Analysis**, a separator,
+and **Delete**.
+
+**"Run This Analysis" is a parameter on the existing run, not a second run path.**
+`SchematicRunService.Prepare` takes an optional `onlyAnalysisName`; everything after the plan — the
+netlist extraction, the elaboration, the corners, the results file, the Data Display refresh — is the
+ordinary run, which is the only way the two can be guaranteed to produce the same numbers. The
+narrowed plan names the analysis **as its own top**, which is what makes the sweep case mean what the
+user means by it: naming an inner sweep runs that sweep and everything it wraps and **not** the sweeps
+wrapping it (4 points over Rb, not the outer chain's 12), and naming a base analysis runs it bare with
+no sweep axis at all. Both halves of `Prepare` plan through one shared local function, so the result
+NAME is the chain's base analysis either way — one card's results land in the same group a full run
+would have written, which is what lets a Data Display built from a full run still resolve them.
+
+Three refusals rather than a wider run: a name that no longer resolves, a disabled card (the checkbox
+says disabled analyses are not run, and a menu item overriding it would make the checkbox mean
+nothing), and a card whose inner analysis is disabled. Silently widening any of them to a full run is
+the one failure mode worth a test, and has one.
+
+**Two traps, both about where a ContextMenu lives.**
+
+- **A right-click does not move a ListBox's selection.** Every item therefore binds
+  `CommandParameter="{Binding}"` — the row under the pointer — rather than reading `SelectedRow`. A
+  Delete that acted on the selection would remove a different card than the one the user pointed at,
+  and it would look like it worked.
+- **A ContextMenu is in a popup, outside the panel's visual tree**, so `$parent[…]` cannot reach the
+  list VM from inside one. `AnalysisRowViewModel.Owner` is a deliberate backlink for exactly that, and
+  it is what makes the menu's `Command` bindings ordinary compiled bindings (`src/Ui` has
+  `AvaloniaUseCompiledBindingsByDefault`, so a wrong path fails the build rather than at right-click
+  time).
+
+The run's lines name the CARD, not just the bench: `Running 'PA · sweep Vgs'`. A sweep card is named
+by the variable it sweeps, because that is what the panel draws — a progress row reading
+`DC1_sweep_Vgs` would name a string that appears nowhere on screen.
+
+The Delete item names what it will remove — "Delete DC1", or "Delete DC1 Vgs Sweep" for a sweep. The
+cards of one chain sit directly under each other and differ only by an indent, so a bare "Delete" on
+the wrong one looks exactly like a Delete on the right one. A sweep is named by the analysis it
+ultimately WRAPS (walking `InnerAnalysisName` to the bottom, regardless of `Enabled` — this is a
+label, so it must name the card the user can see) plus its own variable; its own `Name` is generated
+(`DC1_sweep_Vgs`, and `DC1_sweep_Vgs_sweep_Vds` once nested) and appears nowhere on screen.
+
+Gate: `tests/Ui.Tests/RunOneAnalysisTests.cs`.
+
+### Undo/Redo did not work for an analysis edit — and the edit was never the problem
+
+Reported against Delete (both the card menu and the toolbar's trash button), 2026-09-16. The edit was
+always on a real undo stack and always undoable — **the shell could not find that stack.** Undo routes
+to the ACTIVE DOCUMENT (`WorkspaceViewModel._activeUndoTarget`), and none of the three things that
+normally make that the right answer hold for this panel:
+
+- it is a **TOOL**, so it is never the document dock's active dockable;
+- it deliberately **RETAINS** its schematic when focus moves — which is the whole point, so its
+  analyses stay readable beside the Data Display a run has just opened in front of it. Delete a card
+  in that state and Undo went to the Data Display;
+- it edits the **BASE** session (`sd.ViewModel`) while `SchematicDocument.UndoRedo` follows
+  `ActiveViewModel` — so while the tab is pushed into a sub-cell, Undo went to the sub-cell's stack.
+  A TestBench belongs to the top-level cell, so the panel binding to the base session is correct and
+  the routing was what had to change.
+
+Every mutation the panel makes now goes through `AnalysesListViewModel.ExecuteEdit`, which pushes the
+command and then raises `EditCommitted` carrying the session it landed on; the shell pins its undo
+target to that session (`SessionUndoTarget`, a two-line `IUndoableDocument` over one stack). **An edit
+is what makes a history the undo target** — the same rule an editor follows by being activated — and
+activating any document retargets it again, so the pin lasts only until the user's next click lands
+somewhere that owns a history of its own.
+
+Two things worth keeping in mind here. **Focus was the wrong signal to hang this on**: Dock's
+`FocusedDockableChanged` is what `⌘R`-follows-the-panel already uses, but it answers "which panel" and
+not "which schematic session did that panel just write to", which is the actual question. And **a
+route added later that calls `_schematicVm.Execute` directly would be silently un-undoable from the
+panel** — that is exactly the defect, so `AnalysesPanelUndoTests.EveryPanelEdit_ReportsTheSessionItLandedOn`
+states it over the whole surface rather than over one command.
+
+Gate: `tests/Ui.Tests/AnalysesPanelUndoTests.cs`.

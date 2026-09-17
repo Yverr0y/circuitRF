@@ -258,6 +258,25 @@ overwrites silently on every subsequent run under that same name."/>
                         <Border Padding="4,3"
                                 Background="Transparent"
                                 Margin="{Binding IsSweep, Converter={StaticResource IndentConv}}">
+
+                            <!-- The card's own menu. Every item binds through Owner and passes THIS
+                                 row as its parameter: a right-click does not move a ListBox's
+                                 selection, so a menu reading SelectedRow would act on a different
+                                 card than the one under the pointer. -->
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Run All Analyses"
+                                              Command="{Binding Owner.RunAllCommand}"/>
+                                    <MenuItem Header="Run This Analysis"
+                                              Command="{Binding Owner.RunThisCommand}"
+                                              CommandParameter="{Binding}"/>
+                                    <Separator/>
+                                    <MenuItem Header="{Binding DeleteLabel}"
+                                              Command="{Binding Owner.DeleteRowCommand}"
+                                              CommandParameter="{Binding}"/>
+                                </ContextMenu>
+                            </Border.ContextMenu>
+
                             <Grid ColumnDefinitions="Auto,Auto,*,Auto">
 
                                 <!-- Enabled checkbox -->

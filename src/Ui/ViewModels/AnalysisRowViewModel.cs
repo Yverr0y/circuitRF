@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CircuitRF.Core.Design;
 using CircuitRF.Ui.Commands;
@@ -18,6 +19,14 @@ public sealed partial class AnalysisRowViewModel : ObservableObject
 
     public Core.Design.Analysis Analysis { get; }
 
+    /// <summary>
+    /// The list this row belongs to, so the card's own context menu can bind its commands against the
+    /// row's DataContext. A ContextMenu lives in a popup, outside the panel's visual tree, so an
+    /// ancestor-relative binding to the list VM does not resolve from inside one — this backlink is
+    /// what makes the menu's Command bindings ordinary. Null in tests that build a row on its own.
+    /// </summary>
+    public AnalysesListViewModel? Owner { get; init; }
+
     // ── Displayed fields ──────────────────────────────────────────────────────
 
     public bool Enabled
@@ -26,7 +35,11 @@ public sealed partial class AnalysisRowViewModel : ObservableObject
         set
         {
             if (Analysis.Enabled == value) return;
-            _schematicVm.Execute(new EnableAnalysisCommand(_schematicVm.EditModel, Analysis, value));
+            var cmd = new EnableAnalysisCommand(_schematicVm.EditModel, Analysis, value);
+            // Through the list when there is one, so this checkbox is undoable from the panel for the
+            // same reason every other edit here is (see AnalysesListViewModel.ExecuteEdit).
+            if (Owner is not null) Owner.ExecuteEdit(cmd);
+            else                   _schematicVm.Execute(cmd);
             OnPropertyChanged();
         }
     }
@@ -44,6 +57,36 @@ public sealed partial class AnalysisRowViewModel : ObservableObject
         _                        => "?",
     };
     public string Summary   => ComputeSummary(Analysis, _schematicVm.EditModel);
+
+    /// <summary>
+    /// What the card menu's Delete item says — "Delete DC1", or "Delete DC1 Vgs Sweep" for a sweep.
+    /// A menu item naming what it will remove is worth the words here: the cards of one chain sit
+    /// directly under each other and differ only by an indent, so a bare "Delete" on the wrong one
+    /// looks exactly like a Delete on the right one.
+    ///
+    /// <para>A sweep is named by the analysis it ultimately wraps plus its own variable — NOT by its
+    /// own <c>Name</c>, which is generated (<c>DC1_sweep_Vgs</c>, and <c>DC1_sweep_Vgs_sweep_Vds</c>
+    /// once nested) and appears nowhere on screen.</para>
+    /// </summary>
+    public string DeleteLabel => Analysis is ParametricSweepAnalysis psa
+        ? $"Delete {BaseAnalysisName(psa, _schematicVm.EditModel)} {psa.SweepVarName} Sweep"
+        : $"Delete {Analysis.Name}";
+
+    /// <summary>
+    /// The non-sweep analysis at the bottom of <paramref name="psa"/>'s chain. Walks
+    /// <c>InnerAnalysisName</c> regardless of <c>Enabled</c> — this is a LABEL, so it must name the
+    /// card the user can see rather than the one a run would collapse to. Depth-guarded, and falls
+    /// back to the sweep's own name if the chain dangles.
+    /// </summary>
+    private static string BaseAnalysisName(ParametricSweepAnalysis psa, SchematicEditModel model)
+    {
+        Core.Design.Analysis? a = psa;
+        for (int guard = 0; a is ParametricSweepAnalysis p && guard < 64; guard++)
+            a = model.Analyses.FirstOrDefault(
+                x => string.Equals(x.Name, p.InnerAnalysisName, System.StringComparison.OrdinalIgnoreCase));
+
+        return a is not null and not ParametricSweepAnalysis ? a.Name : psa.Name;
+    }
 
     // ── Construction ──────────────────────────────────────────────────────────
 

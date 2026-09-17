@@ -136,8 +136,15 @@ public static class SchematicRunService
     /// that re-elaborates per point), and the elaborated netlist is handed to
     /// <see cref="Execute"/> rather than being thrown away — so splitting the run in two costs nothing.
     /// Never throws.
+    /// <para/>
+    /// <paramref name="onlyAnalysisName"/> narrows the run to ONE card: the named analysis is planned as
+    /// its own top, so a sweep wrapping it is <b>not</b> run and a sweep named here runs with everything
+    /// inside it. That is the whole difference between the panel's "Run This Analysis" and its Run
+    /// button — the netlist, the elaboration and the engines are identical either way, which is why the
+    /// narrowing lives here rather than in a second run path.
     /// </summary>
-    public static RunPlan Prepare(string netlistPath, string? baseDirectory = null)
+    public static RunPlan Prepare(string netlistPath, string? baseDirectory = null,
+                                  string? onlyAnalysisName = null)
     {
         // ── 1. Read ────────────────────────────────────────────────────────────
         Library  lib;
@@ -203,15 +210,47 @@ public static class SchematicRunService
             if (a is ParametricSweepAnalysis ps && !string.IsNullOrEmpty(ps.InnerAnalysisName))
                 referencedAsInner.Add(ps.InnerAnalysisName);
 
-        foreach (var root in tb.Analyses)
+        if (onlyAnalysisName is not null)
         {
-            if (referencedAsInner.Contains(root.Name)) continue;     // not a root — runs via its outer
+            // ONE card, exactly as the panel drew it. Named rather than indexed because the netlist is
+            // re-extracted for every run and an index into tb.Analyses is not the index the panel row
+            // had; a name that no longer resolves is reported, never silently widened to a full run.
+            var one = tb.Analyses.FirstOrDefault(
+                a => string.Equals(a.Name, onlyAnalysisName, StringComparison.OrdinalIgnoreCase));
 
-            // Skip disabled OUTER sweeps to find the outermost thing that actually runs.
-            var top = AnalysisChain.ResolveEffectiveTop(root, tb);
-            if (top is null || !top.Enabled) continue;               // whole chain disabled
-            if (!AnalysisChain.IsChainRunnable(top, tb)) continue;   // base analysis disabled → nothing runs
+            if (one is null)
+                return new RunPlan(RunStatus.NoAnalysis,
+                    $"Run this analysis: '{onlyAnalysisName}' is not in this schematic.");
+            if (!one.Enabled)
+                return new RunPlan(RunStatus.NoAnalysis,
+                    $"Run this analysis: '{one.Name}' is disabled — enable it to run it.");
+            if (!AnalysisChain.IsChainRunnable(one, tb))
+                return new RunPlan(RunStatus.NoAnalysis,
+                    $"Run this analysis: '{one.Name}' has nothing to run — the analysis it sweeps is disabled.");
 
+            PlanOne(one);
+        }
+        else
+        {
+            foreach (var root in tb.Analyses)
+            {
+                if (referencedAsInner.Contains(root.Name)) continue; // not a root — runs via its outer
+
+                // Skip disabled OUTER sweeps to find the outermost thing that actually runs.
+                var top = AnalysisChain.ResolveEffectiveTop(root, tb);
+                if (top is null || !top.Enabled) continue;               // whole chain disabled
+                if (!AnalysisChain.IsChainRunnable(top, tb)) continue;   // base disabled → nothing runs
+
+                PlanOne(top);
+            }
+        }
+
+        // Plans one already-resolved top — the shared body of the whole-list loop above and the
+        // single-card branch beside it, so the two can never describe or name the same analysis
+        // differently. In particular the result NAME is the chain's base analysis either way, which is
+        // what lets one card's results land in the same group a full run would have written.
+        void PlanOne(Analysis top)
+        {
             var resultName = DeduplicateName(
                 top is ParametricSweepAnalysis psa ? RootInnerName(psa, tb) : top.Name, usedNames);
 
@@ -235,6 +274,7 @@ public static class SchematicRunService
 
         foreach (var raw in tb.RawDirectives)
         {
+            if (onlyAnalysisName is not null) break;   // one card was asked for, and it is not a raw line
             if (raw.Kind != "analysis" || !IsSparamRaw(raw.RawLine)) continue;
             try
             {

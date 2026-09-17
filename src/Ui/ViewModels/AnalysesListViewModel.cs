@@ -10,6 +10,7 @@ using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CircuitRF.Core.Design;
+using CircuitRF.Ui.Commands;
 using CircuitRF.Ui.Commands.Analysis;
 using CircuitRF.Ui.Commands.Schematic;
 using CircuitRF.Ui.Schematic;
@@ -88,7 +89,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         var newValue  = sanitized.Length == 0 ? null : sanitized;
         var current   = _schematicVm.EditModel.ResultsFileName;
         if (!string.Equals(newValue, current, StringComparison.Ordinal))
-            _schematicVm.Execute(new SetResultsFileNameCommand(_schematicVm.EditModel, newValue));
+            ExecuteEdit(new SetResultsFileNameCommand(_schematicVm.EditModel, newValue));
         ResultsFileNameText = sanitized;   // reflect the sanitized+extended form even on a same-value commit
     }
 
@@ -97,8 +98,67 @@ public sealed partial class AnalysesListViewModel : ObservableObject
     /// <summary>Raised when the Run button is pressed; WorkspaceViewModel runs the retained schematic.</summary>
     public event Action? RunRequested;
 
+    /// <summary>Raised by a card's "Run This Analysis"; WorkspaceViewModel runs the retained schematic
+    /// with the run narrowed to this one analysis.</summary>
+    public event Action<Analysis>? RunOneRequested;
+
+    // ── Every edit this panel makes ──────────────────────────────────────────
+
+    /// <summary>
+    /// Raised after an edit has been pushed onto a schematic session's undo stack, carrying the
+    /// session it landed on. <b>This is what makes Undo work from this panel.</b> The panel is a tool,
+    /// so it is never the document dock's active dockable; it RETAINS its schematic when focus moves
+    /// (its analyses stay readable beside the Data Display a run just opened); and it edits the BASE
+    /// session even while that tab is pushed into a sub-cell. The shell's Undo follows the active
+    /// DOCUMENT, so without being told, it had nothing to do with the edit the user just made here.
+    /// </summary>
+    public event Action<SchematicViewModel>? EditCommitted;
+
+    /// <summary>
+    /// The one place this panel mutates a schematic. Pushes the command onto the session's undo stack
+    /// — which is what makes it undoable and marks the document dirty — and then says which session it
+    /// landed on, because nothing else in the shell can work that out for a tool panel.
+    /// </summary>
+    internal void ExecuteEdit(IUiCommand cmd)
+    {
+        if (_schematicVm is null) return;
+        _schematicVm.Execute(cmd);
+        EditCommitted?.Invoke(_schematicVm);
+    }
+
     [RelayCommand(CanExecute = nameof(HasActiveSchematic))]
     private void Run() => RunRequested?.Invoke();
+
+    // ── Card context menu (right-click on a row) ─────────────────────────────
+    //
+    // Every item takes the ROW as its parameter rather than reading SelectedRow: a right-click does
+    // not move a ListBox's selection, so a menu that acted on the selection would run or delete a
+    // card the user was not pointing at — the one mistake a Delete item must not make.
+
+    /// <summary>Card menu ▸ "Run All Analyses" — the panel's Run button, reached from the card.</summary>
+    [RelayCommand(CanExecute = nameof(HasActiveSchematic))]
+    private void RunAll() => RunRequested?.Invoke();
+
+    /// <summary>
+    /// Card menu ▸ "Run This Analysis" — only this card runs. On a parametric sweep that means the
+    /// sweep and everything it wraps, and NOT the sweeps wrapping it; on a base analysis it means the
+    /// bare analysis, with no sweep axis at all.
+    /// </summary>
+    [RelayCommand]
+    private void RunThis(AnalysisRowViewModel? row)
+    {
+        if (row is null || _schematicVm is null) return;
+        RunOneRequested?.Invoke(row.Analysis);
+    }
+
+    /// <summary>Card menu ▸ "Delete" — removes this card, undoably, exactly as the toolbar's Remove
+    /// does for the selected one.</summary>
+    [RelayCommand]
+    private void DeleteRow(AnalysisRowViewModel? row)
+    {
+        if (row is null || _schematicVm is null) return;
+        ExecuteEdit(new RemoveAnalysisCommand(_schematicVm.EditModel, row.Analysis));
+    }
 
     // ── Active-schematic binding ──────────────────────────────────────────────
 
@@ -203,7 +263,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         var current = _schematicVm.EditModel.CornerSelections.TryGetValue(axisKey, out var v) ? v : null;
         if (string.Equals(current, section, StringComparison.Ordinal)) return;
 
-        _schematicVm.Execute(new SetCornerSelectionCommand(_schematicVm.EditModel, axisKey, section));
+        ExecuteEdit(new SetCornerSelectionCommand(_schematicVm.EditModel, axisKey, section));
     }
 
     private void OnModelChanged(object? sender, EventArgs e)
@@ -231,7 +291,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         if (_schematicVm is null) return;
 
         foreach (var a in _schematicVm.EditModel.Analyses)
-            Rows.Add(new AnalysisRowViewModel(a, _schematicVm));
+            Rows.Add(new AnalysisRowViewModel(a, _schematicVm) { Owner = this });
 
         OnPropertyChanged(nameof(IsEmpty));
         RefreshCommandStates();
@@ -247,7 +307,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
                          workspaceRoot: _schematicVm.WorkspaceRoot);
         var result = await AnalysisEditorDialog.ShowAsync(owner, vm, isEdit: false);
         if (result is null) return;
-        _schematicVm.Execute(new AddAnalysesCommand(_schematicVm.EditModel, result));
+        ExecuteEdit(new AddAnalysesCommand(_schematicVm.EditModel, result));
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
@@ -265,21 +325,21 @@ public sealed partial class AnalysesListViewModel : ObservableObject
 
         var result = await AnalysisEditorDialog.ShowAsync(owner, vm, isEdit: true);
         if (result is null) return;
-        _schematicVm.Execute(new EditAnalysisChainCommand(_schematicVm.EditModel, oldChain, result));
+        ExecuteEdit(new EditAnalysisChainCommand(_schematicVm.EditModel, oldChain, result));
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void Remove()
     {
         if (SelectedRow is null || _schematicVm is null) return;
-        _schematicVm.Execute(new RemoveAnalysisCommand(_schematicVm.EditModel, SelectedRow.Analysis));
+        ExecuteEdit(new RemoveAnalysisCommand(_schematicVm.EditModel, SelectedRow.Analysis));
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void Duplicate()
     {
         if (SelectedRow is null || _schematicVm is null) return;
-        _schematicVm.Execute(new DuplicateAnalysisCommand(_schematicVm.EditModel, SelectedRow.Analysis));
+        ExecuteEdit(new DuplicateAnalysisCommand(_schematicVm.EditModel, SelectedRow.Analysis));
     }
 
     [RelayCommand(CanExecute = nameof(CanMoveUp))]
@@ -298,9 +358,9 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         string movedName = moved.Name;
 
         if (moved is ParametricSweepAnalysis psa)
-            _schematicVm.Execute(new ReorderSweepInChainCommand(_schematicVm.EditModel, psa, moveInner: up));
+            ExecuteEdit(new ReorderSweepInChainCommand(_schematicVm.EditModel, psa, moveInner: up));
         else
-            _schematicVm.Execute(new MoveAnalysisChainCommand(_schematicVm.EditModel, moved, moveUp: up));
+            ExecuteEdit(new MoveAnalysisChainCommand(_schematicVm.EditModel, moved, moveUp: up));
 
         SelectedRow = Rows.FirstOrDefault(r =>
             string.Equals(r.Analysis.Name, movedName, StringComparison.OrdinalIgnoreCase));
@@ -381,7 +441,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         }
 
         if (toPaste.Count == 0) return;
-        _schematicVm.Execute(new PasteAnalysesCommand(
+        ExecuteEdit(new PasteAnalysesCommand(
             _schematicVm.EditModel, toPaste, retargetInner: SelectedRow?.Analysis.Name));
     }
 
@@ -443,7 +503,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
         if (_schematicVm is null) return;
         var template = await InsertFromTemplateDialog.ShowAsync(window, _workspaceDir);
         if (template is null) return;
-        _schematicVm.Execute(new PasteAnalysesCommand(_schematicVm.EditModel, template.Analyses));
+        ExecuteEdit(new PasteAnalysesCommand(_schematicVm.EditModel, template.Analyses));
     }
 
     // ── Multi-select support (updated by code-behind SelectionChanged) ────────
@@ -507,6 +567,7 @@ public sealed partial class AnalysesListViewModel : ObservableObject
     private void RefreshCommandStates()
     {
         RunCommand.NotifyCanExecuteChanged();
+        RunAllCommand.NotifyCanExecuteChanged();
         AddCommand.NotifyCanExecuteChanged();
         EditCommand.NotifyCanExecuteChanged();
         RemoveCommand.NotifyCanExecuteChanged();
