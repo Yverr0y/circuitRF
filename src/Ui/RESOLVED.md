@@ -1,5 +1,43 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## circuitRF.app shipped harmonicaRF and wBond inside it, and nothing failed (2026-09-16)
+
+Owner: the arm64 `.dmg` is far too large. It was — **234 MB against the x64 one's 122 MB** for the
+same 1.0.0-beta.24 build, and the two disk images were built minutes apart on one machine.
+
+`circuitRF.app/Contents/MacOS` held three ~131 MB executables: `circuitRF`, `harmonicaRF` and
+`wBond`. The bundle was a byte-for-byte copy of the publish tree, and the publish tree held all
+three.
+
+**Why the tree holds all three.** The three applications are one project with three `Main`s
+(`CircuitRF.Ui.csproj` — `CrfApp` selects the `StartupObject` and, via `CrfRenameApphost`, the name
+of the published host). `CrfApp` does **not** change `$(PublishDir)`, so all three publish into
+`src/Ui/bin/Release/net10.0/<rid>/publish`, and `dotnet publish` never deletes from a publish tree.
+Each host is `PublishSingleFile` + `--self-contained`, so it is not a stub next to shared payload —
+it is the whole application again. Bundle all three on one machine and the next circuitRF bundle
+copies 262 MB of other applications into itself.
+
+**Why it went unnoticed.** Every check passed, because nothing was wrong except size: the app
+installed, launched, signed, notarised and ran correctly, and the two extra binaries are inert files
+under `Contents/MacOS`. The dotted-directory refusal two lines below the copy does not fire (these
+are files, and they have no dot). `lipo` in `packaging/macos/build-macos.sh` reads only the three
+binaries it names. And a large self-contained .NET app is exactly what one expects a large
+self-contained .NET app to look like — the arm64/x64 asymmetry was the only tell, and it existed
+purely because that machine had never bundled harmonicaRF or wBond for Intel.
+
+**Fix:** each of the three `src/Ui/bundleFor*MacOS.sh` scripts drops the other two hosts from
+`Contents/MacOS` after the copy and before `codesign`, keyed off its own `EXECUTABLE_NAME` — so a
+stale host from any previous run goes too, and the three scripts say one thing rather than three.
+Pruning after the copy rather than filtering it is deliberate: the set to remove is named by what
+the script is building.
+
+Windows and Linux were never affected. `build-windows.ps1` publishes into its own `publish\<rid>`
+and `Remove-Item`s it first; `build-linux.sh` publishes into `publish/<rid>`; neither ever passes
+`CrfApp`, so no other application's host reaches either tree.
+
+Gate: `PackagingScriptTests.MacBundleScripts_DropTheOtherApplicationsHosts`, over all three scripts —
+verified to go red when the prune is removed from one of them.
+
 ## The menu bar kept only "circuitRF" after the About dialog, and the menu was never missing (2026-09-15)
 
 Owner, on macOS 27: the native menu bar loses File / Edit / … more often than it used to, and there

@@ -1010,6 +1010,66 @@ public class PackagingScriptTests
     }
 
     /// <summary>
+    /// <b>Every macOS bundle script drops the OTHER two applications' hosts out of
+    /// <c>Contents/MacOS</c>.</b>
+    ///
+    /// <para>circuitRF, harmonicaRF and wBond are one project with three <c>Main</c>s, and
+    /// <c>CrfApp</c> selects the StartupObject and the renamed host — NOT <c>$(PublishDir)</c>. So
+    /// all three publish into the same directory, and a publish tree never deletes anything. Once a
+    /// machine has bundled all three for one RID, that directory holds all three hosts, and each is
+    /// a SELF-CONTAINED SINGLE-FILE binary carrying the entire application: ~131 MB apiece. The
+    /// bundle scripts copy the tree wholesale, so circuitRF.app shipped harmonicaRF and wBond
+    /// inside it.</para>
+    ///
+    /// <para>Nothing failed. The app installed, launched and ran correctly the whole time — the only
+    /// symptom was size, and size alone reads as "self-contained .NET is large". It was found on
+    /// 2026-09-16 because the arm64 circuitRF .dmg was 234 MB against the x64 one's 122 MB, and the
+    /// only difference between those two machines-worth of output was that the other two
+    /// applications had never been bundled for Intel.</para>
+    ///
+    /// <para>Which is why this is a test and not a comment: the leak is invisible in every check
+    /// that already runs, it only appears once someone happens to build all three, and it comes
+    /// straight back the moment the prune is dropped from a script during an edit.</para>
+    /// </summary>
+    [Theory]
+    [InlineData("src/Ui/bundleForMacOS.sh")]
+    [InlineData("src/Ui/bundleForHarmonicaMacOS.sh")]
+    [InlineData("src/Ui/bundleForWBondMacOS.sh")]
+    public void MacBundleScripts_DropTheOtherApplicationsHosts(string relativePath)
+    {
+        var lines = File.ReadAllLines(RepoFile(relativePath.Split('/')))
+                        .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal))
+                        .ToList();
+
+        int copy = lines.FindIndex(l => l.Contains("cp -R", StringComparison.Ordinal)
+                                     && l.Contains("PUBLISH_DIR", StringComparison.Ordinal));
+        Assert.True(copy >= 0, $"{relativePath} no longer copies the publish tree into the bundle.");
+
+        // The loop names all three hosts, so adding a fourth application is a compile-time-visible
+        // edit here rather than a silent 131 MB somewhere.
+        int prune = lines.FindIndex(copy, l => l.Contains("circuitRF harmonicaRF wBond", StringComparison.Ordinal));
+        Assert.True(prune >= 0,
+            $"{relativePath} copies the whole publish tree into Contents/MacOS and never removes the "
+            + "other two applications' hosts. All three apps publish to ONE directory (CrfApp changes "
+            + "the StartupObject, not $(PublishDir)) and nothing cleans it, so on any machine that has "
+            + "bundled all three this ships two extra self-contained single-file binaries — about "
+            + "262 MB — inside an app that works perfectly and says nothing.");
+
+        string body = string.Join("\n", lines.Skip(prune).Take(8));
+        Assert.True(body.Contains("EXECUTABLE_NAME", StringComparison.Ordinal),
+            $"{relativePath} prunes by a hard-coded name rather than by EXECUTABLE_NAME, so the three "
+            + "scripts no longer say the same thing and one of them removes the host it is building.");
+        Assert.True(body.Contains("rm -f", StringComparison.Ordinal)
+                 && body.Contains("MAC_OS_DIR", StringComparison.Ordinal),
+            $"{relativePath} names the other hosts but does not delete them from $MAC_OS_DIR.");
+
+        // Before codesign, or two foreign binaries are sealed into the signature.
+        int sign = lines.FindIndex(l => l.Contains("codesign", StringComparison.Ordinal));
+        Assert.True(sign > prune,
+            $"{relativePath} signs the bundle before dropping the other applications' hosts.");
+    }
+
+    /// <summary>
     /// <b>No <c>--</c> inside an XML comment in any macOS plist.</b> It is illegal XML, but
     /// <c>plutil -lint</c> accepts it, so the file looks fine right up until <c>codesign</c> reads
     /// the ENTITLEMENTS file with its own stricter parser and refuses the whole thing:

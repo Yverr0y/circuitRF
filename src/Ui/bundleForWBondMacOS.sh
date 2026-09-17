@@ -109,6 +109,27 @@ echo "🚚 Copying published files..."
 cp -R "${PUBLISH_DIR}/." "$MAC_OS_DIR/"
 chmod +x "${MAC_OS_DIR}/${EXECUTABLE_NAME}"
 
+# -- The OTHER TWO APPLICATIONS' HOSTS, which dotnet publish leaves sitting right here ---------
+#
+# circuitRF, harmonicaRF and wBond are one project with three Mains, and all three publish to the
+# SAME directory: CrfApp changes the StartupObject and the renamed host, not $(PublishDir). Nothing
+# ever deletes from a publish tree, so once all three have been bundled on a machine the tree holds
+# all three hosts - and each is a SELF-CONTAINED SINGLE-FILE binary carrying the whole application,
+# ~131 MB of it. Copying the tree wholesale therefore put harmonicaRF and wBond inside circuitRF.app,
+# and the only symptom was the disk image's size: measured 2026-09-16, the arm64 circuitRF .dmg was
+# 234 MB against the x64 one's 122 MB, purely because that machine had never bundled the other two
+# for Intel. Everything installed, launched and ran correctly the whole time.
+#
+# So the host this bundle is FOR is kept and the other two are dropped. It is done after the copy
+# rather than by filtering it because the set to remove is named by what this script is building,
+# and because a stale host from a previous run is removed either way.
+for _crf_other in circuitRF harmonicaRF wBond; do
+    if [ "$_crf_other" != "$EXECUTABLE_NAME" ] && [ -f "${MAC_OS_DIR}/${_crf_other}" ]; then
+        echo "   dropping ${_crf_other} (another application's host, left in the shared publish tree)"
+        rm -f "${MAC_OS_DIR}/${_crf_other}"
+    fi
+done
+
 # -- Nothing under Contents/MacOS may have a DOT in a DIRECTORY name --------------------------
 #
 # codesign reads every directory under Contents/MacOS as code, and a dot in a directory's name
