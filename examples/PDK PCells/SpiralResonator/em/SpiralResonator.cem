@@ -1,0 +1,38 @@
+{
+  "FormatVersion": 1,
+  "Name": "SpiralResonator",
+  "LayoutRef": "SpiralResonator/layout/SpiralResonator.clay",
+  "Frequency": {
+    "StartExpr": "2.4",
+    "StopExpr": "3.0",
+    "StepExpr": "",
+    "NumPoints": 13,
+    "Mode": "PointCount",
+    "Kind": "Linear",
+    "StartUnit": "GHz",
+    "StopUnit": "GHz",
+    "StepUnit": "Hz"
+  },
+  "Port1Z0Real": 50,
+  "Port1Z0Imag": 0,
+  "Port2Z0Real": 50,
+  "Port2Z0Imag": 0,
+  "AnalysisLevelNames": [
+    "Metal1",
+    "MIM Metal",
+    "Metal2"
+  ],
+  "DispersionCorrection": true,
+  "ResonanceSearch": false,
+  "RadiationPattern": false,
+  "AnalysisKind": "Planar",
+  "PlanarMesh": {
+    "Auto": false,
+    "CellsPerWavelength": 20,
+    "EdgeMesh": false,
+    "EdgeCells": 1,
+    "MinCellsAcrossConductor": 2,
+    "CurrentModel": "TransmissionLine",
+    "DetailFloorDivisor": 10
+  }
+}

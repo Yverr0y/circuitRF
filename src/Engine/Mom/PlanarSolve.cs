@@ -4434,8 +4434,12 @@ public static class PlanarSolve
     ///   1.6e-3 against a non-passivity excess of 0.73, three decades apart.</description></item>
     ///   <item><description><b>No well-conditioned sub-band to narrow to.</b> Non-passive at 1, 2
     ///   and 3 GHz alike, incoherent below 1 GHz.</description></item>
-    ///   <item><description><b>Cells per wavelength is inert.</b> 20 → 400 leaves σ_max at 1.0443,
-    ///   unchanged to four decimals.</description></item>
+    ///   <item><description><b>Cells per wavelength is inert.</b> MIM-9 measured σ_max unchanged
+    ///   to four decimals at 1.0443 from 20 to 400 on the structure that produced this; MIM-14
+    ///   re-measured the knob itself on the repaired kernel and it is inert for a structural reason
+    ///   rather than a coincidental one — on a plate small enough to sit this close to another
+    ///   level the mesh is BIT-IDENTICAL at 20, 40, 100 and 400, because the pitch is set by the
+    ///   metal's own width and not by λ.</description></item>
     /// </list>
     ///
     /// <para><b>So the attribution follows the counters rather than a fixed guess</b>, and it is a
@@ -4471,23 +4475,30 @@ public static class PlanarSolve
         // Asked first because it is a property of the STRUCTURE and dominates whatever else is true
         // of the sweep. PlanarSolve.Run cannot reach this arm today — LevelSeparationVerdict refuses
         // such a run before a matrix is filled — and it is here rather than deleted because
-        // FullWaveCellOverSeparation is a measurement's name. MIM-12a repaired the kernel defect its
-        // rungs measured and did NOT re-run the ladder, so it still names MIM-12's number. When it moves,
-        // the band between the old floor and the new one becomes runnable and this is the sentence
-        // those runs need. It is reached today through this function's own gate, and through any
-        // caller that measures a sweep it did not solve.
+        // FullWaveCellOverSeparation is a measurement's name and has already moved once: MIM-14 took
+        // it from 40 to 200 when the ladder was re-run on MIM-12a's repaired kernel. It is reached
+        // today through this function's own gate, and through any caller that measures a sweep it
+        // did not solve.
+        //
+        // MIM-14 ALSO CHANGED WHAT IT CAN HONESTLY CLAIM. The sentence used to say the series
+        // element "loses its magnitude and then its sign", which was MIM-12's measurement of the
+        // broken kernel. Past 200 there is now no measurement at all — the two-port and the
+        // cross-level fill both stop there — so it says unmeasured, which is what it is.
         if (pair is { } lp && lp.CellOverSeparation > PlanarLevels.FullWaveCellOverSeparation)
             return $"The cause is the conductor pair at levels {lp.Lower} and {lp.Lower + 1}, " +
                    $"{Um(lp.SeparationM)} apart with a straddling cell of {Um(lp.CellM)} - " +
                    $"cell/separation = {lp.CellOverSeparation:G3}, past the " +
                    $"{PlanarLevels.FullWaveCellOverSeparation} a de-embedded two-port of a close " +
-                   $"level pair is measured over. Past that floor the series element between the " +
-                   $"two levels loses its magnitude and then its sign, and the gain you are seeing " +
-                   $"is what that looks like in S. Thicken the film between those levels in the " +
-                   $"technology, or take the upper level out of the EM run and model the part it " +
-                   $"carries as a circuit element. Refining the mesh does NOT act here and has been " +
-                   $"measured not to: Cells per wavelength 20 to 400 leaves sigma_max unchanged to " +
-                   $"four decimals, and 2 to 8 cells across the conductor moves it the wrong way.";
+                   $"level pair is measured over. Inside that range the series element between the " +
+                   $"two levels comes back within 10% of the electrostatic mutual capacitance of " +
+                   $"the same mesh and every point is passive; past it nothing is measured, and a " +
+                   $"gain is what an unresolved close pair looks like in S. Thicken the film " +
+                   $"between those levels in the technology, or take the upper level out of the EM " +
+                   $"run and model the part it carries as a circuit element. Cells per wavelength " +
+                   $"does NOT act here and has been measured not to: on a plate small enough to sit " +
+                   $"this close to another level, 20 to 400 leaves the mesh bit-identical, because " +
+                   $"that knob sets the pitch along the current and the metal's own width sets it " +
+                   $"across.";
 
         // ── 2. THE DE-EMBEDDING, WHEN ITS OWN COUNTERS CAN ACCOUNT FOR THE EXCESS ───────────────
         //
@@ -4932,27 +4943,39 @@ public static class PlanarSolve
     /// <summary>
     /// <b>MIM-9 item 3 / EM-SEV R-emsev-4 — the FULL-WAVE floor, and it is a REFUSAL.</b>
     ///
-    /// <para><b>Why it is not the note one line down.</b> MIM-8's bound of 200 certifies the
-    /// cross-level FILL and the ELECTROSTATIC plate capacitance, and both of those are true at 200
-    /// today. Neither of them is a de-embedded s-parameter, which is what a user reads. MIM-12
-    /// measured that one — same plate, same feeds, same ports, the straddling cell pinned, only the
-    /// film thickness moving — and it is correct to cell/separation 40, sign-INVERTED by 80 and
-    /// noise at 200. The shipped MMIC technology's own 0.2 µm film puts every capacitor on it at
-    /// 200.</para>
+    /// <para><b>Why it is not the note one line down.</b> The bound up there certifies the
+    /// cross-level FILL and the ELECTROSTATIC plate capacitance. Neither of them is a de-embedded
+    /// s-parameter, which is what a user reads, and the whole of MIM-9 is that quoting the first at
+    /// someone reading the second sent a user the wrong way for days. They are still two
+    /// measurements; since MIM-14 they simply stop at the same ratio.</para>
     ///
-    /// <para><b>R-emsev-4 was deferred once, conditionally, and the condition has now been met from
-    /// the other side.</b> MIM-8 declined to build it because past its own bound the answer was
-    /// UNMEASURED rather than wrong, and refusing on "unmeasured" would be inventing a limit rather
-    /// than reporting one. The measurement now exists and it does not say unmeasured: it says the
-    /// element inverts its sign. So the refusal is earned, in exactly the words
-    /// <see cref="PlanarLevels.CanRepresentVias"/> earns its own with — a plausible wrong answer
-    /// rather than an obvious failure.</para>
+    /// <para><b>MIM-14 moved this from 40 to 200 and the reason is that the kernel was repaired
+    /// under it.</b> MIM-12's rungs — correct to 40, sign-INVERTED by 80, noise at 200 — were taken
+    /// on the kernel MIM-12a then fixed, and MIM-12a did not re-run them. Re-run on the peeled
+    /// kernel, with the fixture's own irreducible feed inductance separated in closed form, no rung
+    /// from cell/separation 0.5 to 200 departs from the electrostatic mutual capacitance of the same
+    /// mesh by more than 10 % and every point is passive. See
+    /// <see cref="PlanarLevels.FullWaveCellOverSeparation"/> for both ladders.</para>
+    ///
+    /// <para><b>R-emsev-4 was deferred once, conditionally, and what it now refuses is different in
+    /// kind.</b> MIM-8 declined to build it because past its own bound the answer was UNMEASURED
+    /// rather than wrong, and refusing on "unmeasured" would be inventing a limit rather than
+    /// reporting one. MIM-12 then measured a sign inversion and the refusal was earned on it. That
+    /// inversion is gone; what is left past 200 is "unmeasured" again — on BOTH sides now, the
+    /// two-port and the fill — and the refusal stays there because
+    /// <see cref="PlanarLevels.CanRepresentVias"/>' own argument holds: approximating it would give
+    /// a plausible wrong capacitance rather than an obvious failure. <b>Removing it instead of
+    /// moving it is how the next regime becomes silent</b> (MIM-9's own instruction).</para>
     ///
     /// <para><b>It names only the remedies that ACT</b> (§3.5's trap, and MIM-9 item 1's whole
-    /// subject). The two mesh knobs were measured directly on this structure and are inert: Cells
-    /// per wavelength 20 → 400 leaves σ_max at 1.0443, unchanged to four decimals, because that knob
-    /// sets the pitch ALONG the current while the plate's own width sets it across; and 2 → 4 → 8
-    /// cells across the conductor moves σ_max from 1.7322 to 1.7491, slightly the WRONG way.</para>
+    /// subject), and MIM-14 re-measured which ones those are on the repaired kernel rather than
+    /// quoting MIM-12's numbers: Cells per wavelength 20 → 40 → 100 → 400 leaves the mesh
+    /// BIT-IDENTICAL on a plate this small (94 cells, a 20 µm straddling cell, σ_max 0.99920 at all
+    /// four), because that knob sets the pitch ALONG the current while the plate's own width sets it
+    /// across. Min cells across conductor DOES act on this quantity — 1 → 2 → 4 takes the straddling
+    /// cell 40 → 20 → 10 µm — but it acts in the direction that makes the ratio SMALLER, and on a
+    /// real layout it is the whole run's shared tensor grid that sets the plate's pitch rather than
+    /// the plate (MIM-10 finding 3).</para>
     ///
     /// <para>Separate from <see cref="LevelSeparationNotes"/> so a caller can have the verdict
     /// without the prose and vice versa, which is what <c>EmRunService.Preflight</c> and
@@ -4970,27 +4993,25 @@ public static class PlanarSolve
         return EmSuitability.No(
             $"Conductor levels {pair.Lower} and {pair.Lower + 1} are {fmt(pair.SeparationM)} apart " +
             $"and the largest cell straddling them is {fmt(pair.CellM)}, i.e. cell/separation = " +
-            $"{pair.CellOverSeparation:G3}, past this solve's measured full-wave floor of " +
-            $"{PlanarLevels.FullWaveCellOverSeparation}. Below that floor the de-embedded two-port " +
-            $"of a pair this close is measured correct; by 80 the series element it publishes had " +
-            $"the wrong SIGN — a capacitor reads as an inductor — and at 200 it was noise. MIM-12's " +
-            $"ladder, one plate pair with only the film thickness moving: C/(ε₀εᵣA/d) = 1.13 at " +
-            $"cell/separation 20 and 1.05 at 40, then −1.02 at 80 and −1.52 at 200. That ladder was " +
-            $"taken BEFORE the kernel defect behind it was repaired (MIM-12a, 2026-09-16) and has " +
-            $"not been re-run, so this floor is where the last measurement put it rather than where " +
-            $"the engine now reaches — it is conservative, not current. Approximating " +
-            $"it would give a plausible wrong capacitance rather than an obvious failure, which is " +
-            $"why it is refused. What acts on this: thicken the film between these two levels in " +
-            $"the technology, or take the upper level out of the EM run and model the part it " +
-            $"carries as a circuit element beside the EM result. What does NOT act, measured on " +
-            $"this structure rather than assumed: Cells per wavelength (20 → 400 leaves σ_max " +
-            $"unchanged to four decimals, because that knob sets the pitch ALONG the current and " +
-            $"the plate's own width sets it across), Min cells across conductor (2 → 4 → 8 moves " +
-            $"σ_max from 1.7322 to 1.7491, slightly the wrong way), and narrowing the sweep (the " +
-            $"run is non-passive at 1, 2 and 3 GHz alike and incoherent below 1 GHz). The " +
-            $"cross-level FILL and the electrostatic plate capacitance ARE measured accurate at " +
-            $"this ratio — neither of those is a de-embedded s-parameter, which is the distinction " +
-            $"this refusal exists to make.");
+            $"{pair.CellOverSeparation:G3}, past the {PlanarLevels.FullWaveCellOverSeparation} this " +
+            $"solve is measured over. Inside it the de-embedded two-port of a pair this close reads " +
+            $"the series element between the two levels within 10% of the electrostatic mutual " +
+            $"capacitance of the same mesh, and passive: MIM-14's ladder, one plate pair with only " +
+            $"the film thickness moving, reads 0.99 / 0.97 / 1.02 / 1.03 / 1.04 / 1.08 of it at " +
+            $"cell/separation 2 / 20 / 40 / 67 / 80 / 200, and the same fixture with the film pinned " +
+            $"at 0.2 µm and only the CELL moving reads 0.93 / 1.00 / 1.02 / 1.02 / 1.03 at " +
+            $"cell/separation 200 / 100 / 66.7 / 50 / 33.3. Past 200 NOTHING is measured — not the " +
+            $"two-port, and not the cross-level fill either — and approximating it would give a " +
+            $"plausible wrong capacitance rather than an obvious failure, which is why it is " +
+            $"refused rather than noted. (MIM-12 measured this same ladder at 1.13 / 1.05 / −1.02 / " +
+            $"−1.52 and the floor stood at 40 for it; that was the kernel MIM-12a then repaired, " +
+            $"and the sign inversion is gone.) What acts on this: thicken the film between these " +
+            $"two levels in the technology, or take the upper level out of the EM run and model the " +
+            $"part it carries as a circuit element beside the EM result. What does NOT act, " +
+            $"measured on this structure rather than assumed: Cells per wavelength — on a plate " +
+            $"small enough to sit this close to another level, 20 → 400 leaves the mesh " +
+            $"bit-identical, because that knob sets the pitch ALONG the current and the metal's own " +
+            $"width sets it across.");
     }
 
     /// <summary>
@@ -5071,19 +5092,28 @@ public static class PlanarSolve
                 $"The closest conductor levels are resolved by the mesh: cell/separation = " +
                 $"{worstRatio:G3} at {where}, inside the " +
                 $"{PlanarLevels.FullWaveCellOverSeparation} the de-embedded two-port of a close " +
-                $"level pair is measured over (MIM-12's ladder: the extracted series element within " +
-                $"13% of ε₀εᵣA/d at cell/separation 20 and 40, and passive) and well inside the " +
+                $"level pair is measured over (MIM-14's ladder: the extracted series element within " +
+                $"10% of the electrostatic mutual capacitance of the same mesh, and passive, at " +
+                $"every rung from cell/separation 2 to 200 — and that electrostatic value is itself " +
+                $"within 1% of ε₀εᵣA/d) and inside the " +
                 $"{PlanarLevels.ValidatedCellOverSeparation} MIM-8 measured the cross-level fill " +
-                $"over (≤ 1.7e-4 against forced-high quadrature; the extracted ELECTROSTATIC plate " +
-                $"capacitance within 1% of ε₀εᵣA/d, and since MIM-12a at EVERY frequency in the " +
-                $"band — 1.006 at 1, 2, 3 and 10 GHz on two meshes, where MIM-12 measured the same " +
-                $"instrument at −0.54 / 1.34 / 1.60 at 1 / 2 / 3 GHz before the film's own image " +
-                $"series was taken out of the kernel fit).");
+                $"over (≤ 1.7e-4 against forced-high quadrature, and since MIM-12a at EVERY " +
+                $"frequency in the band — 1.006 at 1, 2, 3 and 10 GHz on two meshes, where MIM-12 " +
+                $"measured the same instrument at −0.54 / 1.34 / 1.60 at 1 / 2 / 3 GHz before the " +
+                $"film's own image series was taken out of the kernel fit).");
             return notes;
         }
 
         if (worstRatio <= PlanarLevels.ValidatedCellOverSeparation)
         {
+            // ── CURRENTLY UNREACHABLE, AND KEPT DELIBERATELY ────────────────────────────────
+            //
+            // This arm is the band between the two constants, and since MIM-14 they carry the same
+            // number — the de-embedded two-port stopped failing before the fill does, so the band is
+            // empty. It is kept rather than deleted because they remain two independent
+            // measurements over two different instruments (see PlanarLevels' own two doc comments),
+            // either of which can move on its own; deleting the arm would make the next person who
+            // moves one of them discover that the scale has a hole in it.
             notes.Add(EmFinding.Warn(
                 $"CELL/SEPARATION = {worstRatio:G3} at {where}. The cross-level FILL is measured " +
                 $"over this range (≤ 1.7e-4 against forced-high quadrature, out to " +
@@ -5091,13 +5121,10 @@ public static class PlanarSolve
                 $"capacitance (within 1% of ε₀εᵣA/d, and since MIM-12a at every frequency in the " +
                 $"band — 1.006 at 1, 2, 3 and 10 GHz, where MIM-12 measured 1.60 / 1.34 / −0.54 at " +
                 $"3 / 2 / 1 GHz). NEITHER OF THOSE IS A DE-EMBEDDED " +
-                $"S-PARAMETER. The full-wave two-port for a pair this close is measured accurate " +
-                $"only to cell/separation {PlanarLevels.FullWaveCellOverSeparation}; past that the " +
-                $"published series element lost its magnitude and then its sign (MIM-12's ladder: " +
-                $"C/(ε₀εᵣA/d) = 1.05 at 40, −1.02 at 80, −1.52 at 200 — taken before MIM-12a " +
-                $"repaired the kernel and not re-run since). That is why a full-wave " +
-                $"solve on this structure is refused rather than published — see the refusal for " +
-                $"the remedies that act."));
+                $"S-PARAMETER, and the full-wave two-port for a pair this close is measured only to " +
+                $"cell/separation {PlanarLevels.FullWaveCellOverSeparation}. That is why a " +
+                $"full-wave solve on this structure is refused rather than published — see the " +
+                $"refusal for the remedies that act."));
             return notes;
         }
 
@@ -5107,36 +5134,36 @@ public static class PlanarSolve
         // peak is subtracted in closed form, and the FILL's ladder now holds to cell/separation 200
         // with nothing measured beyond it. That is still true and every number below is unchanged.
         //
-        // ── MIM-9 — AND THE REFUSAL IS NOW BUILT, BECAUSE THE WRONG-SIGN RUNG CAME BACK ON A
-        //    DIFFERENT QUANTITY. The fill is not the thing a user reads. MIM-12 measured the
-        //    DE-EMBEDDED two-port over the same axis and it inverts the sign of the series element
-        //    between cell/separation 40 and 80 — so "unmeasured" is no longer what the evidence
-        //    says, and LevelSeparationVerdict refuses. This warning is what accompanies that
-        //    refusal, and the two arms above it are the rest of the same scale. The first clause
-        //    below is the full-wave one because past 200 BOTH statements are true at once and the
-        //    full-wave one is the one that decides whether there is an answer at all.
+        // ── MIM-9 — AND THE REFUSAL IS NOW BUILT. MIM-14 — AND IT NOW FIRES WHERE BOTH HALVES
+        //    STOP AT ONCE. MIM-12 measured a sign inversion in the DE-EMBEDDED two-port between
+        //    cell/separation 40 and 80 and the refusal was earned on it; MIM-14 re-ran that ladder
+        //    on the kernel MIM-12a repaired and the inversion is gone, so the two-port now reaches
+        //    the same 200 the fill does. Past 200 NEITHER is measured, which is what this sentence
+        //    has to say, and LevelSeparationVerdict refuses for the reason CanRepresentVias refuses:
+        //    a plausible wrong capacitance rather than an obvious failure.
         notes.Add(EmFinding.Warn(
             $"CELL/SEPARATION = {worstRatio:G3} at {where}, past the " +
             $"{PlanarLevels.FullWaveCellOverSeparation} a de-embedded two-port of a close level " +
-            $"pair is measured over — which is why this run is refused — and also past the " +
-            $"{PlanarLevels.ValidatedCellOverSeparation} the cross-level fill is measured over. " +
-            $"MIM-8 subtracts the peak a cross-level entry carries — one of width {fmt(worstSep)} " +
-            $"inside a cell of {fmt(worstCell)} — and integrates it in closed form, which held the " +
-            $"cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 against forced-high " +
-            $"quadrature for cell/separation of 5 / 20 / 50 / 200, and the ELECTROSTATIC " +
-            $"capacitance extracted from a plate pair — no port in it — within 1% of ε₀εᵣA/d over " +
-            $"the whole of it: 1.003 at cell/separation " +
-            $"75 and 0.996 at 300, where before it read −0.046 and −0.003. MIM-12 measured that " +
-            $"same instrument down the band and it did NOT hold there — 1.60 / 1.34 / −0.54 at " +
-            $"3 / 2 / 1 GHz on the same capacitor, because the kernel FIT carried 2.7e-2 at 1 GHz " +
-            $"against 8.3e-5 at 10 and a plate capacitance divides that by d/cell; MIM-12a peels " +
-            $"the film's own image series out of that fit and it now reads 1.006 across the band. " +
-            $"Past " +
-            $"{PlanarLevels.ValidatedCellOverSeparation} the FILL was not measured, and that half " +
-            $"is unmeasured rather than known wrong. The FULL-WAVE answer is the other half and it " +
-            $"is measured: past {PlanarLevels.FullWaveCellOverSeparation} the series element " +
-            $"between these two levels loses its magnitude and then its sign, and passivity goes " +
-            $"with it (σ_max up to 1.73 on the plate pair MIM-12 measured). What acts on this is " +
+            $"pair is measured over — which is why this run is refused — and past the " +
+            $"{PlanarLevels.ValidatedCellOverSeparation} the cross-level fill is measured over as " +
+            $"well. Both halves stop here and neither is known wrong beyond it; what is past this " +
+            $"ratio is UNMEASURED. MIM-8 subtracts the peak a cross-level entry carries — one of " +
+            $"width {fmt(worstSep)} inside a cell of {fmt(worstCell)} — and integrates it in closed " +
+            $"form, which held the cross-level matrix block at 2.4e-11 / 7.9e-8 / 2.1e-6 / 1.7e-4 " +
+            $"against forced-high quadrature for cell/separation of 5 / 20 / 50 / 200, and the " +
+            $"ELECTROSTATIC capacitance extracted from a plate pair — no port in it — within 1% of " +
+            $"ε₀εᵣA/d over the whole of it: 1.003 at cell/separation 75 and 0.996 at 300, where " +
+            $"before it read −0.046 and −0.003. MIM-12 measured that same instrument down the band " +
+            $"and it did NOT hold there — 1.60 / 1.34 / −0.54 at 3 / 2 / 1 GHz on the same " +
+            $"capacitor, because the kernel FIT carried 2.7e-2 at 1 GHz against 8.3e-5 at 10 and a " +
+            $"plate capacitance divides that by d/cell; MIM-12a peels the film's own image series " +
+            $"out of that fit and it now reads 1.006 across the band. The FULL-WAVE, de-embedded " +
+            $"two-port is the other half, and MIM-14 re-ran ITS ladder on that repaired kernel: " +
+            $"within 10% of " +
+            $"the electrostatic mutual capacitance of the same mesh, and passive, at every rung out " +
+            $"to 200 — where MIM-12 had read the sign INVERTED from 80 up. So the old wrong-sign " +
+            $"regime is gone and what this sentence now reports is the end of the evidence rather " +
+            $"than a measured failure. What acts on this is " +
             $"the CELL PITCH across the metal on those two levels. " +
             "That pitch is min(λ_g/CellsPerWavelength, width/MinCellsAcrossConductor), " +
             $"and only the first term responds to the frequency knobs" +

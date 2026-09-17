@@ -212,6 +212,95 @@ public sealed class MimResonatorCompositionTests(ITestOutputHelper output) : IDi
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════
+    //  1b — MIM-14's acceptance: the SAME resonator, all-EM, in ONE run
+    // ══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// <b>brief-em-mim-14 M5 — the structure that was refused is ACCEPTED, and the acceptance is
+    /// asked of the real artwork through the real preflight.</b>
+    ///
+    /// <para>This is the run MIM-9 refused and MIM-10 was written to work around. MIM-12 measured
+    /// the de-embedded two-port of a close level pair as sign-INVERTED past cell/separation 40, so
+    /// <c>PlanarLevels.FullWaveCellOverSeparation</c> stood there and this structure — which meshes
+    /// at 60 before the solve grows its feeds and 127 after — was refused before a matrix was
+    /// filled. MIM-12a repaired the kernel behind that
+    /// measurement and MIM-14 re-ran the ladder on it: the floor is 200 and this runs.</para>
+    ///
+    /// <para><b>THE SWEEP ITSELF IS NOT IN THIS TEST, AND THAT IS A DECISION RATHER THAN AN
+    /// OMISSION.</b> It was run, on this file, and its rows are in <c>HISTORY.md</c> §MIM-14: the
+    /// |S11| null at <b>2.77 GHz, −31.6 dB</b> with |S21| = −0.22 dB there, against MIM-10's
+    /// composition route at 2.750 GHz / −0.083 dB / −29.6 dB — <b>0.9 % in frequency and 0.14 dB</b>,
+    /// inside the brief's 2 % and 0.3 dB, and passive at every solved point. What it costs is the
+    /// problem: the DUT is 2,456 unknowns on three levels with four calibration standards solved
+    /// beside it at every frequency, which is ~5 min for thirteen points in a RELEASE build and
+    /// over an hour for five in the Debug build a test run uses. That is larger than the whole
+    /// existing <c>Category=Benchmark</c> tier, so it is measured with the CLI in Release — the
+    /// series' own convention for wall-clock-heavy work — and reproduced by
+    /// <c>dotnet run -c Release --project src/Cli -- em "examples/PDK PCells/SpiralResonator/em/SpiralResonator.cem"</c>.</para>
+    ///
+    /// <para>What IS here is the half that can be asked in a second and is the half that moved: the
+    /// real <c>.cem</c>, the real artwork, the real <c>EmRunService.Preflight</c> — the same call
+    /// <c>circuitrf check</c> makes — reporting that the plate level is in the run, that the film is
+    /// in the medium, and that the level pair the old floor refused is now inside it. A preflight
+    /// that PASSES a setup the run refuses is the drift R-aut4-2 exists to prevent, so this is not a
+    /// weaker question than the sweep about the thing the sweep would have been asked.</para>
+    ///
+    /// <para>The artwork is <c>SpiralResonator.clay</c>, which is <c>SpiralInductor.clay</c> —
+    /// MIM-10's fixture, unchanged — plus a series MIM capacitor drawn as flat artwork rather than
+    /// as a kit instance, so nothing here needs a generator process running.</para>
+    /// </summary>
+    [Fact]
+    public void MIM14_TheSpiralAndTheCapacitorArePREFLIGHTED_OnAllThreeLevels_AndNoLongerRefused()
+    {
+        var setup = TheUsersSetup("SpiralResonator/layout/SpiralResonator.clay", 2.4, 3.0, 13);
+        setup.Name = "SpiralResonator";
+        // The PLATE level joins the run. That is the whole difference from the recipe above, and it
+        // is what puts the 0.2 µm film in the medium.
+        setup.AnalysisLevelNames = ["Metal1", "MIM Metal", "Metal2"];
+
+        var resolved = EmSetupResolver.Resolve(
+            Path.Combine(ExampleRoot(), "SpiralResonator", "em", "SpiralResonator.cem"),
+            setup.LayoutRef, Path.Combine(ExampleRoot(), ".cws"), new TechnologyCache());
+        Assert.NotNull(resolved.Source);
+
+        var pre = EmRunService.Preflight(setup, resolved.Source!);
+        foreach (var f in pre.Findings) output.WriteLine(f.Text);
+        output.WriteLine(pre.Refusal ?? "(not refused)");
+
+        // THE ACCEPTANCE: not refused.
+        Assert.True(pre.Ok, pre.Refusal);
+
+        // …and the reason it is not refused is the one MIM-14 moved, said in the run's own words.
+        // The ratio is the mesh's and 200 is the constant's; both are asserted, because "it runs"
+        // without the ratio would not say whether the floor moved or the mesh did.
+        //
+        // 60 HERE AND 127 IN THE SOLVE, and the difference is not noise. R-fed-1 grows a uniform
+        // feed lead on each port before the DUT is meshed, which widens the artwork, and with
+        // DetailFloorDivisor set the detail floor is a fraction of that extent — so the solve's own
+        // cells are coarser than the preflight's. Both are inside 200, which is the claim; a test
+        // that asserted one number for both would be asserting something untrue.
+        string separation = Assert.Single(
+            pre.Findings, f => f.Text.Contains("cell/separation", StringComparison.Ordinal)).Text;
+        Assert.Contains("are resolved by the mesh", separation, StringComparison.Ordinal);
+        Assert.Contains("cell/separation = 60 ", separation, StringComparison.Ordinal);
+        Assert.Contains("inside the 200", separation, StringComparison.Ordinal);
+        Assert.Equal(200.0, PlanarLevels.FullWaveCellOverSeparation);
+
+        // The film is in the medium and the plate is in the matrix — without those two this would be
+        // the cheap route wearing the expensive one's name.
+        Assert.Contains(pre.Findings,
+            f => f.Text.Contains("CARRIES the patterned thin film", StringComparison.Ordinal));
+        Assert.Contains(pre.Findings,
+            f => f.Text.Contains("3 conductor level(s)", StringComparison.Ordinal));
+
+        // The via CHAIN is the other half of "the plate is really in the run": the Metal1-to-Metal2
+        // post crosses the plate level, so it is several vias and not one, and if it were not built
+        // that way the capacitor's top terminal would not reach the landing pad at all.
+        Assert.Contains(pre.Findings,
+            f => f.Text.Contains("were built as a CHAIN", StringComparison.Ordinal));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════
     //  2 — the port map on the file
     // ══════════════════════════════════════════════════════════════════════════════════════════
 

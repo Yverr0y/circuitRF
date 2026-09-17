@@ -189,66 +189,78 @@ public sealed record PlanarLevels(IReadOnlyList<double> Z, double GroundZ = 0.0)
     /// levels before the FULL-WAVE two-port stops being an answer. A REFUSAL, and a different
     /// quantity from <see cref="ValidatedCellOverSeparation"/> above.</b>
     ///
-    /// <para><b>The two constants do not measure the same thing and that is the whole point of
-    /// there being two.</b> 200 is the range the cross-level FILL and the ELECTROSTATIC plate
-    /// capacitance are measured over — <c>PlanarFill.ScalarPotentialMatrix</c> driven by a 1 V / 0 V
-    /// instrument with no port in it. 40 is the range a DE-EMBEDDED s-parameter is measured over,
-    /// which is what a user actually reads, and it is five times tighter. Quoting the first at
-    /// someone reading the second is the defect MIM-9 exists to fix: a run whose published capacitor
-    /// had the wrong SIGN was being told its capacitance was within 1 %.</para>
+    /// <para><b>The two constants still do not measure the same thing, and that is still the whole
+    /// point of there being two</b> — even now that they carry the same number. 200 up there is the
+    /// range the cross-level FILL and the ELECTROSTATIC plate capacitance are measured over
+    /// (<c>PlanarFill.ScalarPotentialMatrix</c> driven by a 1 V / 0 V instrument, no port in it).
+    /// 200 here is the range a DE-EMBEDDED s-parameter is measured over, which is what a user
+    /// actually reads. They coincide because the two-port no longer fails first, not because they
+    /// became one measurement, and either can move on its own.</para>
     ///
-    /// <para><b>The ladder, measured 2026-09-16</b> (MIM-12), <b>on the kernel as it was BEFORE
-    /// MIM-12a repaired it, and not re-run since</b> — see the MIM-12a paragraph below. One
-    /// 60 × 60 µm plate pair, one set of feeds, one set of ports, the straddling cell pinned at
-    /// 40 µm on every rung, and only the film thickness moving — so cell/separation is the only
-    /// axis. <c>C</c> is the series arm read back from the de-embedded two-port as <c>−1/Y₂₁</c>,
-    /// against ε₀εᵣA/d:</para>
+    /// <para><b>MIM-14 (2026-09-16) re-ran the ladder on the repaired kernel and the number moved
+    /// from 40 to 200. The sign inversion is GONE.</b> MIM-12's rungs at 80 and 200 published a
+    /// capacitor whose series element had the wrong sign; on the peeled kernel the same rungs read
+    /// it right. The tables are in <c>HISTORY.md</c> §MIM-14 and the fixture is
+    /// <c>Mim14DeembeddedFilmTests</c>.</para>
+    ///
+    /// <para><b>The ladder, MIM-12's own design, re-measured</b> — one 60 × 60 µm plate pair, one
+    /// set of feeds, one set of ports, the straddling cell PINNED at 10 µm and only the film
+    /// thickness moving. <c>C</c> is the pi model's direct branch read from the de-embedded
+    /// two-port, against the ELECTROSTATIC mutual capacitance of the SAME mesh (so plate fringing is
+    /// common to both and cancels — <c>C_stat</c> is itself within 1 % of ε₀εᵣA/d at every rung):</para>
     ///
     /// <list type="table">
-    ///   <item><term>cell/sep 20 (d = 2 µm)</term><description>σ_max 0.998, C = 1.12 / 1.13 / 1.15 at 1 / 2 / 3 GHz — correct, the excess is plate fringing</description></item>
-    ///   <item><term>cell/sep 40 (d = 1 µm)</term><description>σ_max 0.998, C = 1.27 / 1.05 / 1.13</description></item>
-    ///   <item><term>cell/sep 80 (d = 0.5 µm)</term><description>σ_max 1.04-1.09, C = −0.93 / −1.02 / −1.10 — magnitude right, SIGN INVERTED</description></item>
-    ///   <item><term>cell/sep 200 (d = 0.2 µm)</term><description>σ_max 1.04-1.73, C = −0.84 / −1.52 / +5.90 — incoherent</description></item>
+    ///   <item><term>cell/sep 2 (d = 5 µm)</term><description>σ_max 0.9989, C/C_stat = 0.991</description></item>
+    ///   <item><term>cell/sep 20 (d = 0.5 µm)</term><description>σ_max 0.9990, 0.969</description></item>
+    ///   <item><term>cell/sep 40 (d = 0.25 µm)</term><description>σ_max 0.9990, 1.019 — MIM-12 read 1.05 here</description></item>
+    ///   <item><term>cell/sep 67 (d = 0.149 µm)</term><description>σ_max 0.9990, 1.030 — the ratio a real spiral-plus-capacitor sits at</description></item>
+    ///   <item><term>cell/sep 80 (d = 0.125 µm)</term><description>σ_max 0.9990, 1.035 — MIM-12 read −1.02</description></item>
+    ///   <item><term>cell/sep 200 (d = 0.05 µm)</term><description>σ_max 0.9991, 1.084 — MIM-12 read −1.52</description></item>
     /// </list>
     ///
-    /// <para><b>It is a REFUSAL rather than a note because of what the answer looks like past it.</b>
-    /// R-prt-13's "report the number, not the verdict" habit is right where the failure is visible:
-    /// a note is enough when the reader can see something is wrong. Here the run produces a
-    /// complete, smooth, reciprocal, plausible two-port whose capacitor is an inductor, and no mesh
-    /// control reaches it — 2, 4 and 8 cells across give 1.7322, 1.7439, 1.7491, i.e. a CONVERGED
-    /// wrong answer moving slightly the wrong way. This is <c>PlanarLevels.CanRepresentVias</c>'
-    /// own argument, in its own words: approximating it would give a plausible wrong inductance
-    /// rather than an obvious failure, which is why it is refused.</para>
+    /// <para><b>And a second ladder MIM-12 did not have, because MIM-12's own axis is not clean.</b>
+    /// Pinning the plate and moving only d makes C ∝ 1/d, so a rung's cell/separation and its
+    /// CAPACITANCE move together and the fixture's own feed inductance resonates with the larger
+    /// ones. So the film is pinned at the shipped 0.2 µm instead and the CELL is moved, which is the
+    /// quantity this constant is actually about — 40 / 20 / 13.3 / 10 / 6.67 µm, i.e. cell/separation
+    /// 200 / 100 / 66.7 / 50 / 33.3, reading 0.934 / 1.004 / 1.018 / 1.023 / 1.028 — inside 10 % over a
+    /// 6× range of the ratio, crossing the control near 100 and departing slowly in BOTH directions,
+    /// which is not the shape an unresolved separation makes. <b>And the RAW per-frequency reading's
+    /// error GROWS as the ratio FALLS</b>: 20.8 / 23.2 / 24.1 / 24.9 % at 3 GHz for
+    /// 100 / 66.7 / 50 / 33.3. A reading that gets worse as the mesh is refined cannot be used to
+    /// set a floor on how coarse the mesh may be — which is the whole argument for the fit, stated
+    /// as a measurement.</para>
     ///
-    /// <para><b>THE CAUSE WAS THE KERNEL FIT, NOT THE CONDITIONING — measured 2026-09-16, and the
-    /// sentence that stood here said otherwise.</b> It read "the cause is a dynamic-range failure",
-    /// from cond(Z) = 1.4e9 and a loss term 11 decades below the matrix on the 60 µm pair at
-    /// 0.5 GHz. Both numbers are real and reproduce to their order, and neither is the cause: the
-    /// ELECTROSTATIC instrument — <c>ScalarPotentialMatrix</c> over 32 cells, conditioned in the
-    /// HUNDREDS — was ALREADY sign-inverted at 1 GHz. A factorisation that loses nine digits cannot
-    /// be what breaks an answer that is broken before the factorisation.</para>
+    /// <para><b>THE FIXTURE CARRIES ~437 pH OF ITS OWN AND IT CANNOT BE SHORTENED.</b> The
+    /// calibration refuses feeds closer together than five substrate heights
+    /// (<c>PlanarSolve</c>'s feed-isolation check), so a de-embedded two-port of a lumped element on
+    /// a 103 µm substrate necessarily contains ~600 µm of line. That inductance is a property of the
+    /// instrument, it is the same at every rung of a pinned-artwork ladder, and it is separable in
+    /// closed form: the branch is L in series with C, so <c>1/Im(−Y₂₁) = 1/(ωC) − ωL</c> is exactly
+    /// linear in ω. Two-parameter least squares over 1 / 2 / 3 GHz returns L at 431-444 pH on every
+    /// rung where it is determined and fits the three susceptances to 1e-4. <b>Reading one frequency
+    /// instead would measure the fixture</b>: at cell/separation 200 with a 4.35 pF plate the
+    /// 3 GHz point sits on the fixture's own self-resonance and reads 3.9×.</para>
     ///
-    /// <para>What broke it is that a plate pair's capacitance is a <c>d/cell</c> difference of two
-    /// INDEPENDENT DCIM fits, so it inherited <c>cell/d</c> times whatever relative error they
-    /// carried. The exact kernel does not move with frequency at all here (5.656193e3 at 1 GHz
-    /// against 5.655920e3 at 10 GHz, direct Sommerfeld), while the FIT carried 8.3e-5 at 10 GHz and
-    /// 2.7e-2 at 1 GHz — and 2.7e-2 × 75 is 200%, which is the sign inversion.</para>
+    /// <para><b>And the capacitance is <c>Im(−Y₂₁)/ω</c>, never <c>−1/(ω·Im(−1/Y₂₁))</c>.</b> Both
+    /// are "the series element read from −1/Y₂₁"; only the first is the quantity an electrostatic
+    /// C₁₂ is. −Y₂₁ is the pi model's direct branch ADMITTANCE, G + jωC. Inverting first and reading
+    /// the reactance gives C(1 + 1/Q²), which on a thin-metal fixture at Q ≈ 3 is 12 % high.</para>
     ///
-    /// <para><b>MIM-12a FIXED THAT KERNEL AND THIS NUMBER DID NOT MOVE, which is a deliberate state
-    /// and not an oversight.</b> The thin region's own image series is now peeled out of the fit's
-    /// samples and carried in closed form, so the cross-level kernel reads 1.4e-6 at 1 GHz instead
-    /// of 2.7e-2 and the electrostatic ladder reads 1.006 at every frequency in the band. <b>The
-    /// DE-EMBEDDED ladder below was NOT re-run</b> — MIM-12 measured it with a harness that is not
-    /// in the tree, and a fresh two-port fixture built to replace it reads its series capacitance
-    /// 6-10× below the electrostatic mutual capacitance of the SAME mesh at cell/separation 1-4,
-    /// i.e. in a regime this floor already admits and where no thin film is involved at all. Until
-    /// that is settled the ladder cannot grade anything, so the floor stays where MIM-12 put it and
-    /// is now CONSERVATIVE: the kernel defect its rungs measured is gone, and how far the two-port
-    /// reaches on the repaired kernel is unmeasured rather than known. Leaving the refusal standing
-    /// is MIM-9's own instruction — a fix that REMOVES it instead of moving it is how the next
-    /// regime becomes silent. See <c>RESOLVED.md</c> §MIM-12 and §MIM-12a.</para>
+    /// <para><b>It is still a REFUSAL rather than a note, and MIM-9's reason is unchanged</b>:
+    /// R-prt-13's "report the number, not the verdict" is right where the reader can SEE something
+    /// is wrong, and past this ratio nothing is measured on either side — neither the de-embedded
+    /// two-port here nor the cross-level fill above. What MIM-12 saw past the old floor was a
+    /// complete, smooth, reciprocal, plausible two-port whose capacitor was an inductor. That
+    /// particular failure is gone; the absence of any measurement past 200 is not, and
+    /// <see cref="PlanarLevels.CanRepresentVias"/>' own argument applies to it unchanged.</para>
+    ///
+    /// <para><b>Leaving the refusal standing while moving it is MIM-9's own instruction</b> — a fix
+    /// that REMOVES it instead of moving it is how the next regime becomes silent. See
+    /// <c>RESOLVED.md</c> §MIM-14 for the three controls the fixture had to pass first, and for why
+    /// MIM-12a's replacement fixture could not grade anything.</para>
     /// </summary>
-    public const double FullWaveCellOverSeparation = 40.0;
+    public const double FullWaveCellOverSeparation = 200.0;
 
     /// <summary>
     /// The refusal, and it is now earned on ONE quantity rather than two.

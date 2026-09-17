@@ -324,19 +324,25 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
     public void M9_1_PastTheFullWaveFloorItRefuses_NamingThePairTheSeparationAndTheCellItMeasured()
     {
         // Item 3. R-emsev-4, deferred by MIM-8 on the grounds that past its bound the answer was
-        // unmeasured rather than wrong. MIM-12 measured it: correct to cell/separation 40, the
-        // SIGN inverted by 80, noise at 200. So the refusal is earned, and it is set at 40.
-        var p = Plates(0.2e-6, 80);
+        // unmeasured rather than wrong. MIM-12 measured it — correct to cell/separation 40, the
+        // SIGN inverted by 80, noise at 200 — and the refusal was earned on that and set at 40.
+        //
+        // MIM-14 RE-RAN THAT LADDER ON THE KERNEL MIM-12a REPAIRED AND THE FLOOR IS 200. The sign
+        // inversion is gone: every rung out to 200 reads the series element within 10% of the
+        // electrostatic mutual capacitance of the SAME mesh, and passive. So the rung this test
+        // refuses at has to move with it — and what the refusal now reports past 200 is that
+        // NOTHING is measured there, on either side, rather than a measured wrongness.
+        var p = Plates(0.2e-6, 500);
         var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
         var verdict = PlanarSolve.LevelSeparationVerdict(p, mesh);
         _out.WriteLine(verdict.Reason);
 
         Assert.False(verdict.Ok);
         Assert.Contains("levels 0 and 1", verdict.Reason);
-        Assert.Contains("cell/separation = 80", verdict.Reason);
-        Assert.Contains("are 200 nm apart", verdict.Reason);           // the separation
-        Assert.Contains("straddling them is 16 µm", verdict.Reason);   // the cell
-        Assert.Contains("floor of 40", verdict.Reason);         // the measured floor
+        Assert.Contains("cell/separation = 500", verdict.Reason);
+        Assert.Contains("are 200 nm apart", verdict.Reason);            // the separation
+        Assert.Contains("straddling them is 100 µm", verdict.Reason);   // the cell
+        Assert.Contains("past the 200 this solve is measured over", verdict.Reason);
 
         // And ONLY the remedies that act. The three the old sentence offered were each measured
         // inert on this very structure, so naming one here is the defect coming back.
@@ -346,9 +352,13 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         Assert.DoesNotContain("narrow the sweep to where", verdict.Reason);
 
         // Inside the floor nothing is refused — the bound has to let the many runs through that it
-        // was never measured against.
-        Assert.True(PlanarSolve.LevelSeparationVerdict(
-            Plates(0.2e-6, 20), SurfaceMesher.Mesh(Plates(0.2e-6, 20), Uniform).Mesh).Ok);
+        // was never measured against. THE RUNG THAT MOVED IS THE POINT OF THIS LINE: 80 is where
+        // MIM-12 read the sign inverted and where this engine used to stop, and it now runs.
+        foreach (double inside in new[] { 20.0, 80.0, 100.0 })
+            Assert.True(PlanarSolve.LevelSeparationVerdict(
+                Plates(0.2e-6, inside),
+                SurfaceMesher.Mesh(Plates(0.2e-6, inside), Uniform).Mesh).Ok,
+                $"cell/separation {inside} is inside MIM-14's own ladder and must not be refused");
     }
 
     [Fact]
@@ -359,7 +369,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // was TRUE at cell/separation 200, and a run whose published capacitor had the wrong sign
         // was reading it. MIM-8's validation is electrostatic; the user is reading a de-embedded
         // s-parameter. The two sentences may not co-exist.
-        foreach (double ratio in new[] { 5.0, 20.0, 40.0, 80.0, 200.0, 500.0 })
+        foreach (double ratio in new[] { 5.0, 20.0, 40.0, 80.0, 500.0, 1000.0 })
         {
             var p = Plates(0.2e-6, ratio);
             var mesh = SurfaceMesher.Mesh(p, Uniform).Mesh;
@@ -387,8 +397,11 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // non-passive run. On the run that produced it, DeembedErrorFloor reads 1.6e-3 against an
         // excess of 0.73 — the peel's own estimate of its own error is three decades too small to
         // be the cause, and the engine already computes it.
+        // MIM-14: the floor is 200, and 40 µm over 200 nm IS 200 — a rung ON the boundary rather
+        // than past it, which would make this fixture's arm a floating-point coin toss. 100 µm is
+        // unambiguously past it and measures the same thing.
         var thin = PlanarSolve.NonPassivityCause(
-            excess: 0.73, peelErrorFloor: 1.6e-3, pair: new PlanarLevelPair(0, 0.2e-6, 40e-6));
+            excess: 0.73, peelErrorFloor: 1.6e-3, pair: new PlanarLevelPair(0, 0.2e-6, 100e-6));
         var peel = PlanarSolve.NonPassivityCause(excess: 0.09, peelErrorFloor: 0.12, pair: null);
         var open = PlanarSolve.NonPassivityCause(excess: 0.73, peelErrorFloor: 1.6e-3, pair: null);
         _out.WriteLine("THIN: " + thin);
@@ -398,7 +411,7 @@ public sealed class MimThinLayerTests(ITestOutputHelper output)
         // A conductor pair past the floor: named, with its separation, and with the two mesh knobs
         // measured inert rather than offered.
         Assert.Contains("levels 0 and 1", thin);
-        Assert.Contains("cell/separation = 200", thin);
+        Assert.Contains("cell/separation = 500", thin);
         Assert.Contains("does NOT act", thin);
         Assert.DoesNotContain("de-embedding rather than the fill", thin);
 

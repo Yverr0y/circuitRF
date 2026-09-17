@@ -1145,7 +1145,15 @@ public class MimCapacitorTests(ITestOutputHelper output)
         // capacitors are let through and correctly so: the 10 µm plate meshes at cell/separation
         // 12.5, and the via-strapped 60 µm one at 18.3, because the MIM Via and the Metal2 strap
         // put gridlines INSIDE the plate and cut the straddling cell to 3.667 µm. Take those away
-        // and the plate is one 60 µm cell wide.
+        // and the plate is meshed on its own width alone.
+        //
+        // MIM-14 MOVED THE FLOOR FROM 40 TO 200 AND THIS FIXTURE HAD TO MOVE WITH IT, which is
+        // worth stating rather than quietly editing: at the mesher's DEFAULT four cells across, a
+        // 60 µm plate over a 0.2 µm film is cell/separation 75, and 75 was past the old floor and
+        // is inside the new one. It is now meshed at ONE cell across — cell/separation 300 — which
+        // is what "past the floor" means since MIM-14: a plate the mesh is not resolving at all.
+        // Leaving the old artwork with the old assertion would have gated on a run that is now
+        // permitted, which is the failure R-aut4-2 exists to prevent one level down.
         var view = new LayoutView { DbuPerMicron = Dbu };
         foreach (var shape in (List<LayoutShape>)
         [
@@ -1163,7 +1171,8 @@ public class MimCapacitorTests(ITestOutputHelper output)
             {
                 Name       = "mim",
                 LayoutRef  = "mim.clay",
-                PlanarMesh = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false),
+                PlanarMesh = new PlanarMeshSettings(Auto: false, CellsPerWavelength: 20, EdgeMesh: false,
+                                                    MinCellsAcrossConductor: 1),
                 Frequency  = new Core.Design.FrequencySpec("1", "1", 1, Core.Design.SweepKind.Linear,
                                                            "GHz", "GHz"),
             },
@@ -1171,7 +1180,8 @@ public class MimCapacitorTests(ITestOutputHelper output)
 
         output.WriteLine(pre.Refusal ?? "(not refused)");
         Assert.False(pre.Ok);
-        Assert.Contains("full-wave floor of 40", pre.Refusal!, StringComparison.Ordinal);
+        Assert.Contains("cell/separation = 300", pre.Refusal!, StringComparison.Ordinal);
+        Assert.Contains("past the 200 this solve is measured over", pre.Refusal!, StringComparison.Ordinal);
         Assert.Contains("thicken the film", pre.Refusal!, StringComparison.Ordinal);
 
         // The scale sentence rides with it rather than being replaced by it.

@@ -8605,7 +8605,7 @@ report — puts **15 of its 50 rows at |S₁₁| above 0 dB** and its deepest ma
 | wall clock to the refusal | 0.47 s |
 | levels | 0 and 1, 0.2 µm apart |
 | largest straddling cell | 33.992 µm |
-| cell/separation | **170**, past the full-wave floor of 40 |
+| cell/separation | **170**, past the full-wave floor *as it was then*, 40 (MIM-14 moved it to 200) |
 | `DetailFloorDivisor` = 200 | the same 33.992 µm — **measured, and it is not the cause** |
 
 MIM-9's own table gives 3.667 µm / 18.3 for a 60 µm plate with a MIM via and a Metal2 strap, and
@@ -8751,6 +8751,12 @@ comment both already record that a de-embedded MIM two-port is a fixture problem
 **`PlanarLevels.FullWaveCellOverSeparation` therefore stays at 40**, and every run-visible sentence
 quoting MIM-12's ladder now says the ladder predates the kernel repair and has not been re-run.
 
+> **Superseded at MIM-14 (2026-09-16).** Every symptom in this table is diagnosed in §MIM-14 Table 1
+> and none of them is the film: the 8 % non-passivity is a two-CELL line whose two reference planes
+> land on one gridline, and the 6-10× is an electrostatic control built without
+> `Dcim.ForStackAtFrequency`, which reads the plate capacitance as 0.033 of ε₀εᵣA/d at 1 GHz. On a
+> fixture fed on ONE level and compared against the run's own fit, the floor is **200**.
+
 # MIM-12 step 0 — where the capacitor's digits are lost (brief-em-mim-12-…, 2026-09-16)
 
 The verdict, and the three claims it retires, are `RESOLVED.md` §MIM-12. These are the tables.
@@ -8876,3 +8882,228 @@ does not have the film's own structure in it, so a linear radial table at the me
 cannot carry what is left. The second row is worth reading twice: **the fitted decomposition reports
 its own remainder as eight decades smaller than it is.** `FitResidual` cannot see this — it measures
 the exponentials against the samples, and it is the samples that are of the wrong function.
+
+# MIM-14 — the de-embedded ladder, re-run on the repaired kernel (brief-em-mim-14-…, 2026-09-16)
+
+The verdict is `RESOLVED.md` §MIM-14. These are the tables. **MIM-12's own rows are kept above, in
+§MIM-12's `PlanarLevels` doc comment and in the tables of this file; they are the before.**
+
+**The fixture.** A series MIM capacitor whose BOTH feeds arrive on the lowest level — port 1 into the
+bottom plate, the top plate strapped sideways on the upper level and down a via onto a landing pad on
+the lowest one, which port 2 feeds. That is the topology a user draws and it needs nothing MIM-4
+added. Shipped MMIC numbers throughout: lower metal 3 µm thick (Rs = 8.13 mΩ/sq), the plate 0.25 µm,
+σ = 4.1e7, the film εᵣ = 6.8 with tanδ = 1e-3, 103 µm of GaAs under it, 3 µm of air over it.
+60 × 60 µm plates, 40 µm feeds 300 µm long, a 20 µm gap and a 40 µm landing pad. 1 / 2 / 3 GHz.
+
+**Two readings, and only one of them is a capacitance.** `−Y₂₁` is the pi model's direct branch
+ADMITTANCE, `G + jωC`, and the electrostatic control measures exactly its `C`. So the reading is
+`Im(−Y₂₁)/ω`. Inverting first and reading the reactance of `−1/Y₂₁` gives `C(1 + 1/Q²)`:
+
+| metal | Rs | Q at 1 GHz | `Im(−Y₂₁)/ω` ÷ control | `−1/(ω·Im(−1/Y₂₁))` ÷ control |
+|---|---|---|---|---|
+| 0.25 µm everywhere | 97.6 mΩ/sq | 2.9 | 1.291 | 1.581 |
+| 2 µm everywhere | 12.2 mΩ/sq | 20.4 | 1.059 | 1.061 |
+| 3 µm / 0.25 µm (shipped) | 8.13 mΩ/sq | 29.9 | 1.035 | 1.036 |
+
+(at cell/separation 40, 1 GHz. The first row is the fixture as first built, and the 12 % gap between
+its two columns is `1/Q²`.)
+
+## Table 1 — the three controls, all with no film in them
+
+**Control 1 — a plain through line on the same port setup.** MIM-12a measured this at 8 %
+non-passive. It is a two-CELL line: at two cells along a 600 µm conductor both de-embedding reference
+planes land on the same gridline and the DUT has zero length. `|S₁₁|` is read in the LINE'S OWN
+reference, because this line is 67–83 Ω and the published S is renormalised to the port's 50 Ω, where
+a perfectly matched section legitimately reads 0.07.
+
+| length | cells across | `|S₁₁|` at Z_c, 1 / 2 / 3 GHz | σ_max, worst |
+|---|---|---|---|
+| 600 µm | 2 | 0.980 / 0.909 / 0.810 | 1.0084 |
+| 600 µm | 4 | 0.133 / 0.061 / 0.035 | 1.0101 |
+| 600 µm | 8 | 0.0131 / 0.0048 / 0.0012 | 1.0002 |
+| 900 µm | 4 | 0.0213 / 0.0018 / 0.0062 | 1.0013 |
+| 900 µm | 8 | 0.0043 / 0.0028 / 0.0025 | 0.9992 |
+
+`PlanarDeembedTests` T4_1's own gate is `|S₁₁| < 3e-2`. **It is the cell count between the reference
+planes, not the ports.**
+
+**Controls 2 and 3**, on the fixture itself. Control 2 is d = 20 µm — cell/separation 0.5–1, a regime
+with no thin film in it at all and one the floor has always admitted. Control 3 is the shipped
+0.2 µm film on three meshes. `C` is the two-parameter series-L-C fit (below); `C_stat` is the
+electrostatic mutual capacitance of the SAME mesh, through the run's own `Dcim.ForStackAtFrequency`.
+
+| control | cell/sep | C | C_stat | C/C_stat | L | fit residual | σ_max |
+|---|---|---|---|---|---|---|---|
+| 2 — d = 20 µm, 2 across | 1 | 18.29 fF | 18.44 fF | **0.9918** | 1155 pH | 4.5e-5 | 0.9991 |
+| 2 — d = 20 µm, 4 across | 0.5 | 18.83 fF | 18.98 fF | **0.9926** | 1178 pH | 4.4e-5 | 0.9988 |
+| 3 — 0.2 µm, 2 across | 100 | 1099.9 fF | 1096.2 fF | **1.0036** | 434 pH | 1.2e-5 | 0.9992 |
+| 3 — 0.2 µm, 3 across | 66.7 | 1116.5 fF | 1097.0 fF | **1.0180** | 438 pH | 3.6e-5 | 0.9991 |
+| 3 — 0.2 µm, 4 across | 50 | 1122.3 fF | 1097.2 fF | **1.0231** | 440 pH | 4.4e-5 | 0.9990 |
+
+Control 3's spread over three meshes is **1.9 %**, against the brief's 5 %. MIM-12a's replacement
+fixture HALVED with every refinement (0.0068 → 0.0045 → 0.0027 → 0.0014 pF); this one does not move.
+
+## Table 2 — the fixture's own inductance, which is irreducible and separable
+
+The calibration refuses feeds closer together than five substrate heights, so on a 103 µm substrate a
+de-embedded two-port of a lumped element necessarily carries ~600 µm of line with it:
+
+| feed length each side | outcome |
+|---|---|
+| 300 µm | runs; L = 434 pH |
+| 150 µm | REFUSED — "Calibrated port feeds are not isolated: port 1 has other metal 0 m away (0 substrate heights, against the 5 a neighbour that carries a port of its own needs)" |
+| 80 µm | REFUSED, same sentence |
+
+That inductance is a property of the INSTRUMENT, the same at every rung of a pinned-artwork ladder,
+and separable in closed form: the branch is L in series with C, so `1/Im(−Y₂₁) = 1/(ωC) − ωL` is
+exactly linear in ω. Two-parameter least squares over 1 / 2 / 3 GHz returns both. **Its residual is
+the number that says whether the reading may be believed**: 1e-5 where the model holds, 3e-3 where the
+rung is approaching the fixture's own self-resonance.
+
+## Table 3 — LADDER A, MIM-12's own design: the cell PINNED at 10 µm, only the film moving
+
+Four cells across the 40 µm feeds; the mesh does not depend on d at all, so the straddling cell is
+pinned by construction. Raw rows are `Im(−Y₂₁)/ω ÷ C_stat` at 1 / 2 / 3 GHz; **C is the fit.**
+
+| cell/sep | d | raw 1 / 2 / 3 GHz | C (fit) | C/C_stat | L | fit resid | σ_max | MIM-12 read |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 5 µm | 1.001 / 1.004 / 1.011 | 51.85 fF | **0.9909** | 1177 pH | 2.8e-3 | 0.9989 | 1.13 at 20 |
+| 20 | 0.5 µm | 1.017 / 1.043 / 1.092 | 447.2 fF | **0.9694** | 660 pH | 9.3e-3 | 0.9990 | 1.13 |
+| 40 | 0.25 µm | 1.035 / 1.087 / 1.186 | 896.3 fF | **1.0188** | 444 pH | 1.7e-4 | 0.9990 | **1.05** |
+| 67 | 0.149 µm | 1.058 / 1.156 / 1.353 | 1510.5 fF | **1.0304** | 437 pH | 4.2e-5 | 0.9990 | — |
+| 80 | 0.125 µm | 1.069 / 1.183 / 1.439 | 1809.8 fF | **1.0354** | 437 pH | 2.5e-4 | 0.9990 | **−1.02** |
+| 200 | 0.05 µm | 1.179 / 1.600 / 3.898 | 4718.0 fF | **1.0843** | 431 pH | 3.6e-3 | 0.9991 | **−1.52** |
+
+`C_stat ÷ ε₀εᵣA/d` is 1.207 / 1.064 / 1.015 / 1.010 / 1.008 / 1.004 down the rungs — the control is
+itself within 1 % of the closed form wherever the plate is large against the film, and its excess at
+the coarse end is plate fringing, which is common to both columns and cancels.
+
+**Every rung passes the 10 % gate and every point is passive. The sign inversion at 80 and 200 is
+gone.** At rung 200 the capacitor is 4.35 pF and resonates with the fixture's 431 pH at 3.65 GHz, so
+the raw 3 GHz row (3.898) is the instrument's own self-resonance and the fit residual says so.
+
+## Table 4 — LADDER B, because MIM-12's axis is not clean: the FILM pinned, only the CELL moving
+
+Pinning the plate and moving d makes C ∝ 1/d, so a rung's cell/separation and its CAPACITANCE move
+together. This ladder pins the film at the shipped 0.2 µm and moves the straddling cell instead —
+which is the quantity the constant is actually about.
+
+| cell/sep | straddling cell | raw 1 / 2 / 3 GHz | C (fit) | C/C_stat | L | fit resid | σ_max |
+|---|---|---|---|---|---|---|---|
+| 200 | 40 µm | 0.949 / 0.999 / 1.096 | 1022.9 fF | **0.9335** | 407 pH | 3.6e-6 | 0.9993 |
+| 100 | 20 µm | 1.023 / 1.085 / 1.208 | 1099.9 fF | **1.0036** | 434 pH | 1.2e-5 | 0.9992 |
+| 66.7 | 13.33 µm | 1.038 / 1.103 / 1.232 | 1116.5 fF | **1.0180** | 438 pH | 3.6e-5 | 0.9991 |
+| 50 | 10 µm | 1.043 / 1.110 / 1.241 | 1122.3 fF | **1.0231** | 440 pH | 4.4e-5 | 0.9990 |
+| 33.3 | 6.67 µm | 1.046 / 1.115 / 1.249 | 1127.7 fF | **1.0276** | 443 pH | 5.2e-5 | 0.9989 |
+
+**The fitted reading is inside 10 % over a 6× range of the ratio**, crossing the control near
+cell/separation 100 and departing slowly in both directions (6.7 / 0.4 / 1.8 / 2.3 / 2.8 % down the
+rungs) — not the shape an unresolved separation makes. **And the RAW per-frequency reading's error
+GROWS as the ratio FALLS**: at 3 GHz it is 9.6 % at cell/separation 200 and 20.8 / 23.2 / 24.1 /
+24.9 % at 100 / 66.7 / 50 / 33.3, because refining the mesh resolves the fixture's own inductance
+better and the lumped-C reference does not have it. **A reading that gets worse as the mesh is
+refined cannot be used to set a floor on how coarse the mesh may be.** That is the whole argument for
+separating L, stated as a measurement.
+
+13.33 µm is exactly the straddling cell of the spiral-plus-capacitor this brief exists for, and 66.7
+is exactly the ratio it was refused at.
+
+**So the floor is 200**: it is the largest rung measured, it passes on both ladders, and it is where
+the cross-level fill's own validation stops too. Past it nothing is measured on either side.
+
+## Table 5 — the inert-knob clause, re-measured on the repaired kernel
+
+MIM-9's refusal quotes "Cells per wavelength 20 → 400 leaves σ_max at 1.0443" and "2 → 4 → 8 cells
+across moves σ_max from 1.7322 to 1.7491". Both were taken on the broken kernel. Re-measured on this
+fixture at the shipped 0.2 µm film:
+
+| knob | straddling cell | cell/sep | cells | σ_max | C/C_stat | L |
+|---|---|---|---|---|---|---|
+| CellsPerWavelength 20 | 20 µm | 100 | 94 | 0.99920 | 1.0034 | 433.6 pH |
+| CellsPerWavelength 40 | 20 µm | 100 | 94 | 0.99920 | 1.0034 | 433.6 pH |
+| CellsPerWavelength 100 | 20 µm | 100 | 94 | 0.99920 | 1.0034 | 433.6 pH |
+| CellsPerWavelength 400 | 20 µm | 100 | 94 | 0.99920 | 1.0034 | 433.6 pH |
+| MinCellsAcrossConductor 1 | 40 µm | 200 | 31 | 0.99929 | 0.9333 | 406.8 pH |
+| MinCellsAcrossConductor 2 | 20 µm | 100 | 94 | 0.99920 | 1.0034 | 433.6 pH |
+| MinCellsAcrossConductor 4 | 10 µm | 50 | 352 | 0.99901 | 1.0229 | 440.4 pH |
+
+**Cells per wavelength is inert for a structural reason rather than a coincidental one: the mesh is
+BIT-IDENTICAL at all four.** On a plate small enough to sit this close to another level the pitch is
+`width/MinCellsAcrossConductor` at any usable λ setting. Min cells across conductor DOES act on the
+straddling cell — and it acts in the direction that makes the ratio smaller, so it is not a remedy for
+being past the floor either; on a real layout the whole run's shared tensor grid sets the plate's
+pitch rather than the plate does (MIM-10 finding 3).
+
+**And the straddling cell takes its pitch from the NARROWEST metal on the two levels, not the widest**:
+at one cell across it is 40 µm — the feed's width — whether the plate is 60, 200 or 400 µm.
+
+## Table 6 — the electrostatic control must go through the run's own fit
+
+The same instrument, the same mesh, the same plates; the only difference is whether the
+`PlanarKernelSet` is handed `Dcim.ForStackAtFrequency`, which `PlanarFrequencyKernel.Fit` calls on
+every run. `C/(ε₀εᵣA/d)` on a bare 60 × 60 µm plate pair, 8 cells across:
+
+| d | cell/sep | own fit (MIM-8's fixture) at 1 GHz | the RUN's fit at 1 GHz | the RUN's fit at 10 GHz |
+|---|---|---|---|---|
+| 0.2 µm | 37.5 | **0.0331** | 1.0059 | 1.0058 |
+| 0.5 µm | 15 | **0.0802** | 1.0119 | 1.0110 |
+| 1 µm | 7.5 | **0.1527** | 1.0209 | 1.0198 |
+| 2.5 µm | 3 | **0.3327** | 1.0426 | 1.0423 |
+
+MIM-12 step 0's convention, one brief on and in the other direction: MIM-8's own fixture is right at
+10 GHz and reads the capacitance as essentially ABSENT at 1 GHz, because without the low-frequency
+widening the sampling path cannot see the stack. Any measurement in this area that builds its own
+kernel set measures a different instrument.
+
+## Table 7 — M5, the acceptance: the structure that was refused, run all-EM
+
+`examples/PDK PCells/SpiralResonator` — MIM-10's own coil with a series 60 × 60 µm MIM capacitor on
+its terminal, three analysis levels (`Metal1`, `MIM Metal`, `Metal2`), the user's own mesh controls
+(2 cells across, transmission-line model, detail floor divisor 10). **1,451 cells, 2,456 unknowns
+(49 % of the dense ceiling), cell/separation 127, passive at every solved point.** Measured with
+`dotnet run -c Release --project src/Cli -- em "…/SpiralResonator/em/SpiralResonator.cem"`,
+**5 min 12 s wall for thirteen points**.
+
+| f (GHz) | \|S21\| (dB) | \|S11\| (dB) |
+|---|---|---|
+| 2.40 | −0.3339 | −17.44 |
+| 2.45 | −0.3079 | −18.69 |
+| 2.50 | −0.2854 | −20.14 |
+| 2.55 | −0.2668 | −21.82 |
+| 2.60 | −0.2512 | −23.80 |
+| 2.65 | −0.2389 | −26.20 |
+| 2.70 | −0.2297 | −29.05 |
+| 2.75 | −0.2234 | **−31.63** |
+| 2.80 | −0.2198 | −31.59 |
+| 2.85 | **−0.2185** | −29.07 |
+| 2.90 | −0.2197 | −26.39 |
+| 2.95 | −0.2239 | −24.18 |
+| 3.00 | −0.2288 | −22.35 |
+
+**The |S11| null is at 2.774 GHz** (parabolic refinement of the three dB points around the minimum),
+**−31.6 dB, with |S21| = −0.223 dB there.** MIM-10's composition route on the same coil and the same
+1.0838 pF: 2.750 GHz, −0.083 dB, −29.6 dB. **0.87 % in frequency and 0.14 dB** — the brief's gate is
+2 % and 0.3 dB.
+
+**Read the resonance off |S11|, not off |S21|.** On the composed route the two coincide. Here |S21| is
+flat to 0.01 dB across the null while its loss slope keeps falling, so its argmax lands at 2.85 GHz —
+a statement about the metal. The null is 12 dB deep over the same span.
+
+**The 0.87 % IS the capacitor's own parasitics**, which the cheap route leaves out by construction:
+the bottom plate to the backside metal through 100 µm of εᵣ = 12.9, the MIM via's inductance and the
+Metal2 bridge. MIM-10's own closing section says 0.11 pF beside a 1 pF series element is a different
+resonator; this is that difference, measured.
+
+**A false start, because it is the easy one to repeat.** The first draft of the artwork drew a
+56 × 56 µm top plate inside a 60 × 60 bottom plate — an overlap 13 % smaller than the kit's — and the
+null came back at ~2.95 GHz, 7 % high, which is exactly √(1.084/0.944). The plate that sets `C` is
+the TOP one and the bottom is it grown by the enclosure.
+
+**Why this is not a test.** At 2,456 unknowns on three levels, with four calibration standards solved
+beside the DUT at every frequency, a FIVE-point sweep in the Debug build a `dotnet test` run uses
+did not finish in an hour of wall clock at 800 % CPU. That is larger than the whole existing
+`Category=Benchmark` tier, so the sweep is measured here, in Release, with the CLI — the series' own
+convention for wall-clock-heavy work — and the test
+(`MimResonatorCompositionTests.MIM14_TheSpiralAndTheCapacitorArePREFLIGHTED_…`) carries the half that
+moved and costs a second: the real `.cem` through the real `EmRunService.Preflight`, not refused,
+with the plate level in the run, the film in the medium and the via built as a chain.
