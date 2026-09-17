@@ -674,7 +674,7 @@
                               Content="Adaptive sampling (solve fewer points, model the rest)"
                               IsChecked="{Binding ViewModel.AdaptiveSampling}"
                               IsEnabled="{Binding ViewModel.AdaptiveSamplingDisabledReason, Converter={x:Static ObjectConverters.IsNull}}"
-                              ToolTip.Tip="Solves a subset of the requested frequencies and models the rest, refining until a solved midpoint agrees with the model to 1e-3 in |S|. The published sweep is always exactly the grid you asked for, and every solved point carries the solver's own result unchanged. Turn this off to solve every point."/>
+                              ToolTip.Tip="Solves a subset of the requested frequencies and models the rest, refining until a solved midpoint agrees with the model to 1e-3 in |S|. The published sweep is always exactly the grid you asked for, and every solved point carries the solver's own result unchanged. Both ends of the sweep are always solved, and a DC point is never modelled - 0 Hz is answered by its own conduction solve. Turn this off to solve every point."/>
                     <TextBlock Classes="colhdr" TextWrapping="Wrap"
                                Text="{Binding ViewModel.AdaptiveSamplingDisabledReason}"
                                IsVisible="{Binding ViewModel.AdaptiveSamplingDisabledReason, Converter={x:Static ObjectConverters.IsNotNull}}"/>

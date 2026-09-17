@@ -877,8 +877,14 @@ what a coarse one costs**, because it solves only where the response is actually
 3. Solve a **midpoint** and compare it with what the model predicted.
 4. Where they disagree, add samples there and refit. Where they agree, stop.
 
-The tolerance is agreement to 10<sup>-3</sup> in |S|. Three properties are worth knowing:
+The tolerance is agreement to 10<sup>-3</sup> in |S|. Four properties are worth knowing:
 
+- **Both ends of your sweep are always solved, and so is a DC point.** The first and last frequencies
+  you asked for are the refinement's own starting samples, so neither end is ever modelled. A 0 Hz
+  point is not part of the sampling at all: it is taken out of the sweep and answered as a conduction
+  network — resistance only, no reactance — so the bias path an HB or s-parameter run reads off it is
+  solved, not interpolated. Points low enough that the full-wave fit has no valid range carry that
+  same answer, and the run says which ones did.
 - **The published sweep is always exactly the grid you asked for.** Adaptive sampling changes which
   points are *solved*, never which are *reported*.
 - **Every solved point carries the solver's own result, unchanged.** Nothing that was actually solved is

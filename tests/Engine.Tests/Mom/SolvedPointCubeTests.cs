@@ -85,6 +85,38 @@ public sealed class SolvedPointCubeTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// <b>Owner report, 2026-09-16: a sweep that asked for DC published its DC row as MODELLED.</b>
+    /// It never was — 0 Hz is taken off the front of the grid before any of the full-wave machinery
+    /// runs and answered by the conduction solve (LF1), and the points below the field solver's
+    /// range carry that same solve's answer (LF2). What went wrong is the mask: it was built from
+    /// the adaptive path's solved set, which is indexed into the grid those points had already been
+    /// removed from. A reader checking the flag before trusting the bias path was told the one row
+    /// nothing is interpolated into came out of an interpolant.
+    ///
+    /// <para>The endpoints are in the same assertion because they are the same question asked of the
+    /// full-wave half: the seed set is both ends of the grid and everything else is bisected between
+    /// them (<c>SeedIndices</c>), so the bottom and the top of a sweep are always solved, never
+    /// modelled. T0_4 pins that on the seed function; this pins it on what a run publishes.</para>
+    /// </summary>
+    [Fact]
+    public void ThePointsTheConductionSolveAnswered_AndBothEndsOfTheGrid_ArePublishedAsSolved()
+    {
+        // 0 Hz, one point below the fit floor (2.98 MHz on this stack), then an ordinary grid.
+        double[] freqs = [0.0, 1e3, .. Grid(7.5e8, FHz, 15)];
+        var run  = Run(freqs, new PlanarAdaptiveSettings(Tolerance: 1e-2));
+        var mask = MaskOf(run);
+
+        Assert.Equal(1.0, mask[0]);                 // DC — the conduction solve's own answer
+        Assert.Equal(1.0, mask[1]);                 // sub-floor — the same solve, at the user's f
+        Assert.Equal(1.0, mask[2]);                 // the bottom of the full-wave grid: a seed
+        Assert.Equal(1.0, mask[^1]);                // the top of it: the other seed
+
+        // …and the fixture still models something, or none of the above is evidence of anything.
+        Assert.Contains(0.0, mask);
+        output.WriteLine($"{mask.Count(v => v != 0)} of {mask.Length} published point(s) flagged solved.");
+    }
+
+    /// <summary>
     /// The mask rides the same frequency axis the S cube does, because that is what lets a reader
     /// line the two up without matching floating-point values by hand.
     /// </summary>

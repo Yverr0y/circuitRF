@@ -8225,13 +8225,19 @@ public partial class WorkspaceViewModel : ViewModelBase, ITreeActions, IHierarch
         // sweep is routinely one — refinement runs to the grid floor and every requested point is
         // solved. That is the feature working, not failing, and the row now says which of the two
         // happened rather than promising a modelled remainder that does not exist.
+        // "solved", not "solved by the full-wave kernel" (2026-09-16). The solved set carries the
+        // 0 Hz point and any point below the field solver's range, which the conduction solve
+        // answers rather than the full-wave kernel — and it has to carry them, or a sweep that asked
+        // for DC reports its own DC row as modelled. The count and the requested total are then
+        // over the same set of points, which is also what makes the comparison below true when a
+        // sweep starting at DC solved everything.
         if (adaptive && result.PlanarSolve is { } ps && ps.SolvedFrequencies.Count > 0)
             return ps.SolvedFrequencies.Count >= requestedPoints && requestedPoints > 0
-                ? $"solved — {points}, every one solved by the full-wave kernel: adjacent points of " +
+                ? $"solved — {points}, every one solved: adjacent points of " +
                   "this sweep differ by more than the adaptive tolerance, so none could be modelled " +
                   "from its neighbours. A finer sweep is where adaptive sampling saves time"
-                : $"solved — {points}, {ps.SolvedFrequencies.Count:N0} solved by the full-wave " +
-                  "kernel and the rest modelled from those";
+                : $"solved — {points}, {ps.SolvedFrequencies.Count:N0} solved and the rest " +
+                  "modelled from those";
 
         // Adaptive was ASKED for but the run did not report a solved set — which is what happens when
         // the registry picked the cross-section kernel, where every point is closed-form anyway.

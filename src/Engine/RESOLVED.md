@@ -2219,3 +2219,51 @@ moment the search splices a found point in.
 Gate: `tests/Engine.Tests/Mom/SolvedPointCubeTests.cs` — routine tier (~3 s on the coarse FR-4 line):
 the flags match `SolvedFrequencies` point for point on a sweep that exercises both kinds, a plain
 sweep is all ones, and the cube sits on the sweep's own axis.
+
+## The DC point was published as MODELLED, and it had been solved all along (2026-09-16)
+
+Owner report: with adaptive frequency sampling on, a sweep that asked for DC did not appear to
+simulate it — and the same question was asked about the top of the sweep.
+
+**Nothing was being skipped. The mask was wrong about it.** LF1 takes 0 Hz off the front of the grid
+before any full-wave machinery reads it and answers it with `PlanarDcSolve` — a conduction network,
+exact for the meshed structure — and LF2 does the same for the points below the fit's floor. Both are
+spliced back on at the end. But `solvedList`, which `PlanarKernel.BuildDataSet` turns into
+`planar.PointSolved`, is the ADAPTIVE path's set of solved GRID POSITIONS, and it is indexed into the
+grid those points had already been removed from. So `PointSolved` read 0 at 0 Hz: *"this matrix came
+out of the interpolant through the points that were solved"* — of the one row in the file that
+nothing is interpolated into, and the row a user takes an HB or s-parameter run's bias path from. A
+reader who checked the flag before trusting the file was told the exact opposite of the truth.
+
+It is only the adaptive path. With sampling off `solvedList` is empty, which is the convention
+`SampleProvenance.BuildSolvedCube` reads as "every published point was solved", so DC read 1 — which
+is why this survived: **the flag was right in every configuration except the one it exists for.**
+
+The fix is at the splice, not at the seeding: `solvedList` is also the interpolant's NODE list
+(`nodeF`) until the sweep is published, so adding 0 Hz to it any earlier would make DC a node of a
+spline over a grid it is not on. The LF1/LF2 frequencies go in where their points do, and only when
+the list is non-empty.
+
+**The sub-floor points go in for the same reason and it is the same reason.** They carry that
+conduction solve's answer at the user's own frequency; no interpolant touches them either. What they
+*are* is `ConductionSubstitutionNote`'s sentence — resistance only, no reactance — and the mask
+answers a narrower question than that one: computed, or modelled from the ones that were.
+
+**The top and bottom of the sweep were never at risk**, and that is structural rather than lucky:
+`PlanarAdaptiveSweep.SeedIndices` is both endpoints plus interior indices, and refinement only
+BISECTS between solved points, so the first and last frequencies of the full-wave grid are always
+among the first solved. `AdaptiveSweepTests.T0_4` pins it on the seed function; the new test pins it
+on what a run publishes.
+
+Two reporting consequences, both fixed with it:
+
+- the adaptive note counts over the FULL-WAVE grid, so a 17-point sweep starting at DC said "9 of 16
+  were solved" and left the seventeenth to be read as modelled. It now names the LF1/LF2 points and
+  says they were never candidates for modelling.
+- `WorkspaceViewModel.EmRunSummary` said "N solved by the full-wave kernel"; the DC point is not the
+  full-wave kernel's, so the phrase is now just "N solved". Its `>= requestedPoints` comparison also
+  only becomes reachable for a sweep starting at DC once DC is in the count.
+
+Gate: `SolvedPointCubeTests.ThePointsTheConductionSolveAnswered_AndBothEndsOfTheGrid_ArePublishedAsSolved`
+(routine tier, ~2 s on the coarse FR-4 line) — 0 Hz, a 1 kHz sub-floor point and both ends of the
+full-wave grid read 1, with interior points still modelled so the assertion is evidence of something.

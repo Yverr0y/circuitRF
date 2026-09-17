@@ -202,6 +202,15 @@ public sealed class EmSetup
     /// residual — and the published grid is always exactly the grid that was asked for, with every
     /// solved point carrying the solver's own matrix byte for byte.</para>
     ///
+    /// <para><b>The two ends of the sweep and a DC point are never modelled</b> (owner report,
+    /// 2026-09-16). Refinement SEEDS on both endpoints and only ever bisects between solved points,
+    /// so the first and last frequencies asked for are always solved; and 0 Hz is not part of the
+    /// sampling at all — LF1 takes it off the grid before any of this runs and <c>PlanarDcSolve</c>
+    /// answers it as a conduction network, which is what makes the bias point a circuit run reads
+    /// off that row trustworthy. The points below the fit's floor are the same solve at the user's
+    /// own frequency (LF2). All of them are flagged SOLVED in <c>planar.PointSolved</c>; they used
+    /// not to be, which is how this reached an owner as "adaptive did not simulate my DC point".</para>
+    ///
     /// <para>Turn it off to solve every requested point. Nothing about kernel A is affected: a
     /// cross-section solve is a closed form per frequency and 101 of them are sub-second.</para>
     /// </summary>

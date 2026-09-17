@@ -3955,6 +3955,32 @@ public static class PlanarSolve
                 adaptiveNote.Append("The solve budget was reached before every interval converged — " +
                                     "treat the modelled points with that in mind. ");
 
+            // LF1/LF2 — the count above is over the FULL-WAVE grid, and that is not the whole sweep
+            // when 0 Hz or a point below the field solver's range was asked for: both were taken off
+            // the front before any of this ran. Without this sentence "9 of 16 were solved" is read
+            // against a seventeen-point sweep as "and the other one was modelled", which is the
+            // reading that sent an owner looking for a DC point that had in fact been solved.
+            if (wantDc || subFloor.Length > 0)
+            {
+                bool   many  = (wantDc ? 1 : 0) + subFloor.Length > 1;
+                string below = subFloor.Length == 1
+                    ? "the point below the field solver's range"
+                    : $"the {subFloor.Length} points below the field solver's range";
+                string subject = wantDc && subFloor.Length > 0
+                    ? $"The 0 Hz point and {below}"
+                    : wantDc
+                        ? "The 0 Hz point"
+                        : $"{char.ToUpperInvariant(below[0])}{below[1..]}";
+                adaptiveNote.Append(subject)
+                            .Append(many
+                                ? " are not in that count and were never candidates for modelling: " +
+                                  "the conduction solve answers them directly, and they are " +
+                                  "published as SOLVED points. "
+                                : " is not in that count and was never a candidate for modelling: " +
+                                  "the conduction solve answers it directly, and it is published " +
+                                  "as a SOLVED point. ");
+            }
+
             adaptiveNote.Append(extraRaw.Count > 0
                 ? $"{extraRaw.Count} further frequency(ies) were ADDED by the resonance search and " +
                   "are flagged as such; every point of your own grid is published exactly as it was. "
@@ -4227,6 +4253,36 @@ public static class PlanarSolve
             if (subFloor.Length > 0)
                 notes.Add(ConductionSubstitutionNote(subFloor, stackHeightM, problem.MaxFrequencyHz));
             if (wantDc) points.Insert(0, DcPoint(dc));
+
+            // ── AND SO DOES THEIR PROVENANCE: THESE POINTS WERE SOLVED (owner report, 2026-09-16)
+            //
+            // `solvedList` is the ADAPTIVE path's set of solved grid positions, and it is built from
+            // `freqs` — which is the grid with 0 Hz and the sub-floor points already taken off it.
+            // So a sweep that asked for DC published it with PointSolved = 0, i.e. "this matrix came
+            // out of the interpolant through the points that were solved". That is exactly backwards:
+            // the DC row is the one row of the file nothing is interpolated into. It is a conduction
+            // solve of the meshed structure (LF1), the answer an HB or s-parameter run reads the bias
+            // path off, and a reader checking the mask before trusting it was told the opposite.
+            //
+            // The sub-floor points go in for the same reason and it is the same reason, not a second
+            // one: they carry that solve's answer at the user's own frequency (LF2) and no
+            // interpolant touches them either. What they ARE is said by ConductionSubstitutionNote
+            // above, which is where "resistance only, no reactance" belongs — the mask answers a
+            // narrower question ("was this computed, or modelled from the ones that were?") and for
+            // these points the answer is computed.
+            //
+            // Only when the list is non-empty: an EMPTY solved list is the non-adaptive convention
+            // for "every published point was solved" (SampleProvenance.BuildSolvedCube fills ones),
+            // and seeding it here would invert it into "only DC was solved".
+            if (solvedList.Length > 0)
+            {
+                var withLowFrequency = new List<double>(1 + subFloor.Length + solvedList.Length);
+                if (wantDc) withLowFrequency.Add(0.0);
+                withLowFrequency.AddRange(subFloor);
+                withLowFrequency.AddRange(solvedList);
+                solvedList  = withLowFrequency.ToArray();
+                solvedCount = solvedList.Length;
+            }
         }
 
         return new PlanarSolveResult
