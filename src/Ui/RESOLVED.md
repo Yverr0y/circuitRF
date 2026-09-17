@@ -1,5 +1,52 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## A series probe could not break into a DOUBLED wire run, and nothing said so (2026-09-16)
+
+Owner: dropping a WSProbe onto a wire does not break into it the way an IProbe does.
+
+**The two kinds are not treated differently anywhere.** `SeriesProbeInsertion.IsSeriesProbe` has
+covered both since WSP-4, `CommitPlacement` is the single commit path for the click-arm and the
+drag-and-drop gestures alike, and the two pin geometries are one connection pitch apart — IProbe at
+local `(0,100)/(100,100)`, WSProbe at `(0,0)/(100,0)` — so under grid snap they are exactly
+equivalent. Sweeping every drop position along every wire segment of all ten example schematics and
+of the reported design, aiming pin 0 at the identical point for both kinds, gives **zero**
+behavioural differences. The report was real; the asymmetry was not.
+
+**What was actually refusing was `RunsAlongSpan`**, and the run it refused on is invisible. The
+reported design carries two wires along its input line at `y=-300` — `(-400,-300)→(-200,-300)` lying
+entirely inside `(-500,-300)→(-200,-300)` — which draw as ONE line. Cutting one leaves the other
+shorting the probe, so the placement was refused, correctly and **silently**, at every position
+along that run (measured: 0 cuts out of 21 drop positions). That is the gate line, which is exactly
+where a stability probe goes and not where an ammeter would have been tried; the same doubled run is
+in the two-tone design beside it. A refusal with nothing to look at is indistinguishable from a
+feature that does not work.
+
+**The fix is to cut the span out of every wire that carried it**, which is the hand edit exactly —
+`FindShortedSpan` became `FindShortedSpans` and returns one span per wire, the caller folds one
+`CutWireSpanCommand` per wire into the same undo entry. **This needed no new safety judgement**:
+`SpanIsClear` already refuses when any other wire has a VERTEX strictly inside the span, so a wire
+that reaches the cut necessarily spans the whole of it and is in the same position as the first one.
+What is left of `RunsAlongSpan` is the partial-overlap case, which that vertex check refuses anyway.
+
+Two traps in doing it:
+
+- **`CutWireSpanCommand` recorded its wire's index in the CONSTRUCTOR.** With several cuts in one
+  placement, every cut after the first has already had the list moved under it, and the pieces land
+  in a jumbled order. The index is taken at `Execute` now and kept for `Undo`, which reverses them.
+- **A wire doubling back over its own run** would be two cuts on one wire object, which the cut
+  command has no shape for. Refused whole rather than half-cut — it is not what a doubled run looks
+  like.
+
+`TwoWiresCoveringTheWholeSpan_AreAmbiguousAndLeftAlone` pinned the old refusal and is now
+`..._AreBothCut`, in `tests/Ui.Tests/SeriesProbePlacementClearsWireTests.cs` (renamed from
+`IProbePlacementClearsWireTests`: the rule is about series probes, not one kind). The WSProbe half
+was already gated by `tests/Ui.Tests/Schematic/WSProbePlacementTests.cs`.
+
+**Still silent, and still worth knowing:** a junction dot, another component's pin, a net label or a
+crossing wire inside the span refuses the cut and says nothing. Those are genuine — removing the
+copper under them re-partitions the net — but the user sees a probe that did not break in, with no
+way to tell which of the two it was.
+
 ## circuitRF.app shipped harmonicaRF and wBond inside it, and nothing failed (2026-09-16)
 
 Owner: the arm64 `.dmg` is far too large. It was — **234 MB against the x64 one's 122 MB** for the

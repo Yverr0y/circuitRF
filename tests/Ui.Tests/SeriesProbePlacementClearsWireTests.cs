@@ -5,15 +5,18 @@ using CircuitRF.Ui.ViewModels;
 namespace CircuitRF.Ui.Tests;
 
 /// <summary>
-/// An IProbe placed onto a wire clears the stretch of wire between its own two pins, so the probe
-/// is in series with the run instead of shorted by it — but only at PLACEMENT, and only when the
-/// cut provably changes no circuit. See <see cref="SeriesProbeInsertion"/>.
+/// A SERIES PROBE placed onto a wire clears the stretch of wire between its own two pins, so the
+/// probe is in series with the run instead of shorted by it — but only at PLACEMENT, and only when
+/// the cut provably changes no circuit. See <see cref="SeriesProbeInsertion"/>.
+///
+/// <para>These drive an IProbe because it is the shorter fixture; the kind is not what the rule
+/// turns on, and <c>WSProbePlacementTests</c> holds the other one.</para>
 ///
 /// <para>Grid snap is off in these fixtures on purpose: it lets a junction be put at the MIDDLE of
 /// the span between the two pins, which the shipped 100-unit connection grid has no coordinate for
 /// (the probe's pins are exactly one pitch apart). The rule under test is geometric, not grid-bound.</para>
 /// </summary>
-public class IProbePlacementClearsWireTests
+public class SeriesProbePlacementClearsWireTests
 {
     // R0 IProbe pins sit at (X, Y+100) and (X+100, Y+100) — so this places the two pins at
     // (px, py) and (px+100, py).
@@ -219,8 +222,15 @@ public class IProbePlacementClearsWireTests
         Assert.Equal([(150.0, 0.0), (250.0, 0.0)], Pts(model.Wires[1]));
     }
 
+    /// <summary>
+    /// A DOUBLED run — two wires drawn along the same line — is cut on BOTH, not refused. Two wires
+    /// on one line draw as one line, so the doubling is invisible: refusing left the affordance
+    /// silently inert everywhere along that run, with nothing on the sheet to explain it. Removing
+    /// the same stretch from every wire that carried it IS the hand edit. Reported against a design
+    /// whose input run carried a redundant second wire over part of its length.
+    /// </summary>
     [Fact]
-    public void TwoWiresCoveringTheWholeSpan_AreAmbiguousAndLeftAlone()
+    public void TwoWiresCoveringTheWholeSpan_AreBothCut()
     {
         var (model, vm) = MakeVm();
         AddWire(model, (0, 0), (500, 0));
@@ -228,6 +238,15 @@ public class IProbePlacementClearsWireTests
 
         PlaceProbe(vm, 200, 0);
 
+        Assert.Equal(4, model.Wires.Count);
+        Assert.Equal([(0.0, 0.0), (200.0, 0.0)],   Pts(model.Wires[0]));
+        Assert.Equal([(300.0, 0.0), (500.0, 0.0)], Pts(model.Wires[1]));
+        Assert.Equal([(100.0, 0.0), (200.0, 0.0)], Pts(model.Wires[2]));
+        Assert.Equal([(300.0, 0.0), (400.0, 0.0)], Pts(model.Wires[3]));
+
+        // One undo entry still, and it puts both wires back as they were.
+        vm.UndoRedo.Undo();
+        Assert.Empty(model.Components);
         Assert.Equal(2, model.Wires.Count);
         Assert.Equal([(0.0, 0.0), (500.0, 0.0)],   Pts(model.Wires[0]));
         Assert.Equal([(100.0, 0.0), (400.0, 0.0)], Pts(model.Wires[1]));
@@ -276,7 +295,7 @@ public class IProbePlacementClearsWireTests
         Assert.Equal([(0.0, 900.0), (500.0, 900.0)], Pts(model.Wires[0]));
     }
 
-    // ── Scope: placement only, IProbe only ────────────────────────────────────
+    // ── Scope: placement only, series probes only ─────────────────────────────
 
     [Fact]
     public void AnotherComponentPlacedAcrossAWire_NeverCutsIt()

@@ -3447,9 +3447,16 @@ public sealed partial class SchematicViewModel : ObservableObject
         // SeriesProbeInsertion has proved the cut carries no junction and therefore changes no
         // circuit. Which kinds count is that class's own question. See it.
         IUiCommand place = new PlaceComponentCommand(EditModel, comp);
-        if (SeriesProbeInsertion.IsSeriesProbe(kind) &&
-            SeriesProbeInsertion.FindShortedSpan(EditModel, comp) is { } shorted)
-            place = new CompositeCommand(new CutWireSpanCommand(EditModel, shorted), place);
+        if (SeriesProbeInsertion.IsSeriesProbe(kind))
+        {
+            // Every wire carrying the run, not just one: a doubled run draws as a single line, so
+            // cutting one of the pair and leaving the other would short the probe under a sheet
+            // that looks exactly right. The cuts are built BEFORE any of them runs, so each reads
+            // the wire list the user dropped onto.
+            var cuts = SeriesProbeInsertion.FindShortedSpans(EditModel, comp);
+            for (int i = cuts.Count - 1; i >= 0; i--)
+                place = new CompositeCommand(new CutWireSpanCommand(EditModel, cuts[i]), place);
+        }
 
         Execute(place);
         SelectPlacedPart(comp.Id);

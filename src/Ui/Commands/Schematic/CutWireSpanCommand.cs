@@ -5,8 +5,8 @@ namespace CircuitRF.Ui.Commands.Schematic;
 /// <summary>
 /// Removes the stretch of one wire between two points on a single segment of it, leaving the
 /// wire's two remaining pieces exactly where they were. This is the cut a user performs by hand
-/// after dropping an IProbe onto a wire — see <see cref="SeriesProbeInsertion"/> for when it is
-/// allowed to happen for them.
+/// after dropping a series probe onto a wire — see <see cref="SeriesProbeInsertion"/> for when it is
+/// allowed to happen for them, and for why a doubled run is several of these in one placement.
 ///
 /// <para>Unlike <see cref="DeleteSegmentsCommand"/> the cut is PARTIAL: it takes a sub-run of one
 /// segment rather than whole segments, because the two probe pins land wherever the user dropped
@@ -21,16 +21,19 @@ internal sealed class CutWireSpanCommand : IUiCommand
 {
     private readonly SchematicEditModel _model;
     private readonly EditableWire       _original;
-    private readonly int                _originalIndex;
     private readonly List<EditableWire> _replacements = [];
+
+    // Where the original sat when the cut RAN, not when it was built: a doubled run is several of
+    // these in one placement, and each earlier cut has already changed the list the next one reads.
+    // Taken at Execute and kept for Undo, which reverses them in the opposite order.
+    private int _originalIndex;
 
     public string Description => "Clear Wire Under Probe";
 
     public CutWireSpanCommand(SchematicEditModel model, SeriesProbeInsertion.ShortedSpan span)
     {
-        _model         = model;
-        _original      = span.Wire;
-        _originalIndex = model.Wires.IndexOf(span.Wire);
+        _model    = model;
+        _original = span.Wire;
 
         var pts = span.Wire.Points;
 
@@ -58,7 +61,8 @@ internal sealed class CutWireSpanCommand : IUiCommand
 
     public void Execute()
     {
-        int insertAt = Math.Min(Math.Max(_originalIndex, 0), _model.Wires.Count);
+        _originalIndex = _model.Wires.IndexOf(_original);
+        int insertAt   = Math.Min(Math.Max(_originalIndex, 0), _model.Wires.Count);
         _model.Wires.Remove(_original);
         for (int i = 0; i < _replacements.Count; i++)
             _model.Wires.Insert(Math.Min(insertAt + i, _model.Wires.Count), _replacements[i]);

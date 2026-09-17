@@ -19,12 +19,22 @@ namespace CircuitRF.Ui.Schematic;
 /// headless twin of this rule is <c>check</c>'s <c>wsprobe.shorted</c>.</para>
 ///
 /// <para><b>The result must be electrically identical to the hand edit</b>, and that is the whole
-/// constraint on <see cref="FindShortedSpan"/>. The cut is allowed only when the two pins sit on
-/// ONE straight segment of ONE wire and the open stretch between them carries nothing else — no
+/// constraint on <see cref="FindShortedSpans"/>. The cut is allowed only when the two pins sit on
+/// ONE straight segment and the open stretch between them carries nothing else — no
 /// junction dot, no other wire touching or crossing it, no other component's pin, no net label
 /// anchored inside it. Anything in there is a connection to a third thing, and removing the copper
 /// under it would re-partition the net rather than break it in series. In that case this returns
-/// null and the placement behaves exactly as it always did; the user still has the manual route.</para>
+/// nothing and the placement behaves exactly as it always did; the user still has the manual route.</para>
+///
+/// <para><b>Several wires can carry the same run, and then every one of them is cut.</b> Two wires
+/// drawn along the same line draw as ONE line, so a run that is doubled is invisible on the sheet —
+/// and cutting only one of them leaves the other still shorting the probe, which is why this used
+/// to refuse the whole placement there rather than half-do it. Refusing was silent, and the sheet
+/// gives the user nothing to look at, so the affordance simply stopped working on that run with no
+/// way to find out why. Cutting the span out of ALL of them is the hand edit, exactly: the same
+/// stretch of copper is gone from every wire that carried it. That it is safe is not a new
+/// judgement — a second wire whose own vertex falls INSIDE the span is still refused below, so any
+/// wire that reaches this point spans the whole cut and is in the same position as the first.</para>
 ///
 /// <para><b>Placement only.</b> The caller is <c>SchematicViewModel.CommitPlacement</c>, the single
 /// commit path for the click-arm and drag-and-drop placements — so a later drag of a placed probe
@@ -55,25 +65,26 @@ public static class SeriesProbeInsertion
         (double X, double Y) Second);
 
     /// <summary>
-    /// The span <paramref name="probe"/> would short out, or null when there is none or when
-    /// removing it would change the circuit. <paramref name="probe"/> is the component about to be
-    /// placed and is NOT expected to be in <paramref name="model"/> yet — which is also what keeps
-    /// its own pins out of the "something else is in the way" scan.
+    /// The spans <paramref name="probe"/> would be shorted by — one per wire carrying the run, or
+    /// empty when there is none or when removing them would change the circuit.
+    /// <paramref name="probe"/> is the component about to be placed and is NOT expected to be in
+    /// <paramref name="model"/> yet — which is also what keeps its own pins out of the "something
+    /// else is in the way" scan.
     /// </summary>
-    public static ShortedSpan? FindShortedSpan(SchematicEditModel model, EditableComponent probe)
+    public static IReadOnlyList<ShortedSpan> FindShortedSpans(
+        SchematicEditModel model, EditableComponent probe)
     {
         const double tol = SchematicEditModel.ConnectTolerance;
 
         var defs = model.PortDefsOf(probe);
-        if (defs.Count != 2) return null;
+        if (defs.Count != 2) return [];
         var a = model.PortWorldOf(probe, defs[0]);
         var b = model.PortWorldOf(probe, defs[1]);
-        if (SchematicGeometry.CoincidentPoints(a.X, a.Y, b.X, b.Y, tol)) return null;
+        if (SchematicGeometry.CoincidentPoints(a.X, a.Y, b.X, b.Y, tol)) return [];
 
-        // Both pins on ONE straight segment. Two pins on two different segments means the run
-        // between them turns a corner, which is not the shape this affordance is for; two pins on
-        // two different wires means the short (if there is one) is not one wire's to give up.
-        ShortedSpan? found = null;
+        // Both pins on ONE straight segment. Two pins on two different segments of the same run
+        // means it turns a corner between them, which is not the shape this affordance is for.
+        List<ShortedSpan> found = [];
         foreach (var w in model.Wires)
         {
             var pts = w.Points;
@@ -84,16 +95,17 @@ public static class SeriesProbeInsertion
                 if (!SchematicGeometry.PointOnSegment(a.X, a.Y, px, py, qx, qy, tol)) continue;
                 if (!SchematicGeometry.PointOnSegment(b.X, b.Y, px, py, qx, qy, tol)) continue;
 
-                // A second segment covering the same span means cutting one of them leaves the
-                // other still shorting the probe. Ambiguous — leave the sheet alone.
-                if (found is not null) return null;
+                // One wire doubling back over its own run: two cuts on one wire object, which the
+                // cut command has no shape for. Rare, and not what a doubled run looks like —
+                // leave the sheet alone rather than half-cut it.
+                if (found.Exists(f => ReferenceEquals(f.Wire, w))) return [];
 
                 bool aFirst = Dist2(px, py, a.X, a.Y) <= Dist2(px, py, b.X, b.Y);
-                found = new ShortedSpan(w, i, aFirst ? a : b, aFirst ? b : a);
+                found.Add(new ShortedSpan(w, i, aFirst ? a : b, aFirst ? b : a));
             }
         }
 
-        return found is { } span && SpanIsClear(model, span) ? span : null;
+        return found.Count > 0 && SpanIsClear(model, found) ? found : [];
     }
 
     /// <summary>
@@ -101,11 +113,11 @@ public static class SeriesProbeInsertion
     /// ends themselves are excluded on purpose: that is where the probe's own pins land, and a
     /// wire, pin or dot meeting the run exactly there stays connected to the probe afterwards.
     /// </summary>
-    private static bool SpanIsClear(SchematicEditModel model, ShortedSpan span)
+    private static bool SpanIsClear(SchematicEditModel model, List<ShortedSpan> cuts)
     {
         const double tol = SchematicEditModel.ConnectTolerance;
-        var (ax, ay) = span.First;
-        var (bx, by) = span.Second;
+        var (ax, ay) = cuts[0].First;
+        var (bx, by) = cuts[0].Second;
 
         bool Inside(double x, double y)
             => SchematicGeometry.PointOnSegmentInterior(x, y, ax, ay, bx, by, tol);
@@ -130,7 +142,7 @@ public static class SeriesProbeInsertion
         // (its body passes through), or a collinear duplicate lying along it.
         foreach (var w in model.Wires)
         {
-            if (ReferenceEquals(w, span.Wire)) continue;
+            if (cuts.Exists(c => ReferenceEquals(c.Wire, w))) continue;
             var pts = w.Points;
             if (pts.Count == 1 && Inside(pts[0].X, pts[0].Y)) return false;
 
@@ -145,7 +157,7 @@ public static class SeriesProbeInsertion
             }
         }
 
-        // The cut wire's own vertices cannot fall inside the span — both cut points lie on one
+        // A cut wire's own vertices cannot fall inside the span — both cut points lie on one
         // straight segment, whose interior has none by construction. Nothing to check.
         return true;
     }
