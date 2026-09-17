@@ -253,6 +253,29 @@ public sealed class SymbolEditorCanvas : Control
             _viewModel.CanvasZoom = _zoom;
     }
 
+    // ── Stepped zoom ──────────────────────────────────────────────────────────
+
+    /// <summary>One step closer, anchored on the middle of the canvas — the keyboard's
+    /// Ctrl/⌘+'+'. Centre-anchored rather than pointer-anchored because the keyboard gesture
+    /// carries no pointer position, which is the same choice <c>LayoutCanvas.ZoomIn</c> makes.</summary>
+    public void ZoomIn()  => ZoomAtCenter(_zoom * ZoomFactor);
+
+    /// <summary>One step further out, anchored on the middle of the canvas — Ctrl/⌘+'-'.</summary>
+    public void ZoomOut() => ZoomAtCenter(_zoom / ZoomFactor);
+
+    private void ZoomAtCenter(double newZoom)
+    {
+        double cx = Bounds.Width / 2.0, cy = Bounds.Height / 2.0;
+        double wx = cx / _zoom + _panX;
+        double wy = cy / _zoom + _panY;
+        _zoom = Math.Clamp(newZoom, MinZoom, MaxZoom);
+        _panX = wx - cx / _zoom;
+        _panY = wy - cy / _zoom;
+        if (_viewModel is not null) _viewModel.CanvasZoom = _zoom;
+        ViewportChanged?.Invoke(this, EventArgs.Empty);
+        InvalidateVisual();
+    }
+
     // ── World ↔ screen ─────────────────────────────────────────────────────
 
     private double ScreenToWorldX(double sx) => sx / _zoom + _panX;
@@ -399,6 +422,13 @@ public sealed class SymbolEditorCanvas : Control
             if (e.Key == Key.C) { ClipboardCopyRequested?.Invoke(this, EventArgs.Empty); e.Handled = true; return; }
             if (e.Key == Key.X) { ClipboardCutRequested?.Invoke(this, EventArgs.Empty);  e.Handled = true; return; }
             if (e.Key == Key.V) { ClipboardPasteRequested?.Invoke(this, EventArgs.Empty); e.Handled = true; return; }
+
+            // Ctrl/⌘ +/- step the zoom, exactly as the layout editor's canvas does. OemPlus/OemMinus
+            // are the main row — and OemPlus is what the key reports whether or not Shift is down,
+            // which is what makes ⌘+'+' work without a separate Shift branch; Add/Subtract are the
+            // numeric keypad, which reports different keys for the same characters.
+            if (e.Key is Key.OemPlus  or Key.Add)      { ZoomIn();  e.Handled = true; return; }
+            if (e.Key is Key.OemMinus or Key.Subtract) { ZoomOut(); e.Handled = true; return; }
         }
 
         // Arrow keys pan the VIEW when nothing is selected — see CanvasArrowPan. Ahead of the VM

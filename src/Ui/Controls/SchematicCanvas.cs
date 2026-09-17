@@ -374,6 +374,14 @@ public sealed class SchematicCanvas : Control
         return (minX - margin, minY - margin, maxX + margin, maxY + margin);
     }
 
+    /// <summary>One step closer, anchored on the middle of the canvas — the keyboard's
+    /// Ctrl/⌘+'+'. Centre-anchored rather than pointer-anchored because the keyboard gesture
+    /// carries no pointer position, which is the same choice <c>LayoutCanvas.ZoomIn</c> makes.</summary>
+    public void ZoomIn()  => ZoomAtPoint(new Point(Bounds.Width / 2.0, Bounds.Height / 2.0), +1);
+
+    /// <summary>One step further out, anchored on the middle of the canvas — Ctrl/⌘+'-'.</summary>
+    public void ZoomOut() => ZoomAtPoint(new Point(Bounds.Width / 2.0, Bounds.Height / 2.0), -1);
+
     public void ZoomToPage()
     {
         _panX = 0; _panY = 0; _zoom = 1.0;
@@ -830,6 +838,13 @@ public sealed class SchematicCanvas : Control
         if (ctrl && e.Key == Key.C) { ClipboardCopyRequested?.Invoke(this, EventArgs.Empty); e.Handled = true; return; }
         if (ctrl && e.Key == Key.X) { ClipboardCutRequested?.Invoke(this, EventArgs.Empty);  e.Handled = true; return; }
         if (ctrl && e.Key == Key.V) { ClipboardPasteRequested?.Invoke(this, EventArgs.Empty); e.Handled = true; return; }
+
+        // Ctrl/⌘ +/- step the zoom, exactly as the layout editor's canvas does. OemPlus/OemMinus are
+        // the main row — and OemPlus is what the key reports whether or not Shift is down, which is
+        // what makes ⌘+'+' work without a separate Shift branch; Add/Subtract are the numeric keypad,
+        // which reports different keys for the same characters.
+        if (ctrl && e.Key is Key.OemPlus  or Key.Add)      { ZoomIn();  e.Handled = true; return; }
+        if (ctrl && e.Key is Key.OemMinus or Key.Subtract) { ZoomOut(); e.Handled = true; return; }
 
         // F5 — Move Labels (invoked synchronously; BeginMoveLabels snapshots selection state).
         if (e.Key == Key.F5)

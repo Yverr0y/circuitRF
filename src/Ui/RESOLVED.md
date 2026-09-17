@@ -1,5 +1,34 @@
 # src/Ui — resolved briefs (detail, off the CLAUDE.md growth path)
 
+## Ctrl/⌘ +/- stepped the zoom in one editor out of three (2026-09-17)
+
+Owner: the schematic and symbol editors do not zoom on Ctrl/⌘ +/-, and the layout editor does — make
+them the same.
+
+**The gesture existed only where it had been argued for.** `LayoutCanvas` (and the wBond editor, and
+the Data Display) gained the keys when the Zoom In toolbar button became a magnifier that arms rather
+than zooms, which left the keyboard as the only place a single step lived. The schematic and symbol
+editors kept a step-zoom button, so nobody noticed their keyboard never had one — and after the
+magnifier change they were the odd pair, not the layout editor.
+
+**`SchematicCanvas` and `SymbolEditorCanvas` handle it in their own `OnKeyDown`, exactly where
+`LayoutCanvas` does** — not in the view's tunnel handler. Both views' tunnels already fall through
+on a Ctrl combination they do not own (`OemCloseBrackets`/`OemOpenBrackets` in the schematic's,
+`Ctrl+A` in the symbol's), so the key reaches the canvas, and both canvases take keyboard focus on
+pointer press the way `LayoutCanvas` does.
+
+- **`Key.OemPlus` is what the key reports whether or not Shift is down**, so ⌘+'+' — which is
+  ⌘+Shift+'=' on a US layout — needs no Shift branch. `Key.Add`/`Key.Subtract` are the numeric
+  keypad, which reports different keys for the same characters.
+- **The step is anchored on the MIDDLE of the canvas**, because a key press names no point. The
+  schematic's `ZoomIn`/`ZoomOut` route through its existing `ZoomAtPoint` (where a positive `deltaY`
+  is zoom IN, as the wheel reads it); the symbol canvas had its zoom arithmetic inline in
+  `OnPointerWheel` only, so it gained a `ZoomAtCenter` of the shape `LayoutCanvas` already has.
+
+Gate: the existing `CanvasArrowPanAndZoomBoxTests.TheKeyboardStillStepsTheZoom`, which gained the two
+canvases as rows. It is a source scan for the reason that file already records — no `UserControl` in
+this project can be constructed headlessly, so a real `KeyEventArgs` cannot be raised at one.
+
 ## Dropping a part on a wire broke into it, but only for the two probes (2026-09-17)
 
 Owner: the wire cut a WSProbe placement performs should work for every two-terminal part — R, L, C,

@@ -282,10 +282,16 @@ public class CanvasArrowPanAndZoomBoxTests
     /// <summary>
     /// …and Ctrl/Cmd +/- still steps the zoom in each of them, which is the whole reason the button
     /// could give it up. The Data Display had the binding already; the other two gained one.
+    ///
+    /// <para>The schematic and symbol canvases are here for a different reason (owner, 2026-09-17):
+    /// neither had the gesture at all, so the one editor that did was the odd one out. They step the
+    /// zoom on the same keys, about the middle of the canvas, since a key press names no point.</para>
     /// </summary>
     [Theory]
     [InlineData("src/Ui/Controls/LayoutCanvas.cs")]
     [InlineData("src/Ui/Views/WBond/WBondEditorView.axaml.cs")]
+    [InlineData("src/Ui/Controls/SchematicCanvas.cs")]
+    [InlineData("src/Ui/Controls/SymbolEditorCanvas.cs")]
     public void TheKeyboardStillStepsTheZoom(string path)
     {
         var code = CodeOf(path.Split('/'));
